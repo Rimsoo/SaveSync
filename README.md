@@ -23,16 +23,22 @@ converts it on the fly.
 - **Never deletes anything on Steam**: it only replaces the save files it syncs; the game's own
   backup files (`.bak`, per-version copies…) are left untouched.
 - **Fast start**: games are only checked when you open them.
+- **Safe by design**: a game that is not on your Steam account cannot be synced.
 - English and French interface (follows the console language, switchable with **Y**).
 
 ## Supported games
 
 Game profiles live in [`homebrew/romfs/games.ini`](homebrew/romfs/games.ini).
 
-| Game | Status | Conversion | Synced saves |
-|---|---|---|---|
-| Hollow Knight | ✅ verified | PC (AES-encrypted) ↔ Switch (plain JSON) | `user1.dat` … `user4.dat` |
-| Nine Sols | ✅ verified | none (same format) | `saveslot0` … `saveslot3/flags.sav` |
+| Game | Status | Conversion |
+|---|---|---|
+| Hollow Knight | ✅ verified | PC (AES-encrypted) ↔ Switch (plain JSON) |
+| Nine Sols | ✅ verified | none (same format) |
+| Hollow Knight: Silksong | 🟡 unverified | same as Hollow Knight |
+| Absolum, Dispatch, Monument Valley 2 | 🟡 unverified | none |
+
+See [docs/GAMES.md](docs/GAMES.md) for details and the **wanted list**: games whose Steam
+side is already known and that only need someone to check their Switch save.
 
 **Unverified** profiles are shown with an orange badge and an extra warning before any write:
 they are based on research but nobody has tested them for real yet. If you try one, please

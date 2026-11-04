@@ -9,6 +9,7 @@
 #include "i18n.h"
 #include "log.h"
 #include "net.h"
+#include "pattern.h"
 #include "profiles.h"
 #include "saves.h"
 #include "steam_auth.h"
@@ -69,6 +70,7 @@ static struct {
     Game games[MAX_GAMES];
     int ngames;
     int sel_game, sel_item;
+    int scroll_game, scroll_item;  // première ligne visible de chaque liste
 
     // Connexion par QR
     SteamQrLogin qr;
@@ -152,6 +154,20 @@ static void item_label(const SyncItem *it, char *out, size_t len)
         snprintf(out, len, "%s", it->label);
 }
 
+// Fait défiler une liste pour que la ligne sélectionnée reste visible
+static int scroll_to(int scroll, int sel, int visible)
+{
+    if (sel < scroll)
+        return sel;
+    if (sel >= scroll + visible)
+        return sel - visible + 1;
+    return scroll;
+}
+
+// Zone entre l'en-tête et le pied de page
+#define LIST_TOP (HEADER_H + 24)
+#define LIST_BOTTOM (SCREEN_H - FOOTER_H - 56)
+
 // ------------------------------------------------------------------ éléments graphiques
 
 static void draw_badge(int x, int y, const char *text, Color c)
@@ -173,6 +189,17 @@ static int draw_hint(int x, int y, const char *button, const char *label)
 typedef struct {
     const char *button, *label;
 } Hint;
+
+static void draw_scrollbar(int scroll, int visible, int total)
+{
+    if (total <= visible)
+        return;
+    int track_h = LIST_BOTTOM - LIST_TOP;
+    int thumb_h = track_h * visible / total;
+    int thumb_y = LIST_TOP + track_h * scroll / total;
+    gfx_round_rect(SCREEN_W - MARGIN / 2 - 3, LIST_TOP, 6, track_h, 3, C_PANEL);
+    gfx_round_rect(SCREEN_W - MARGIN / 2 - 3, thumb_y, 6, thumb_h, 3, C_SUB);
+}
 
 static void draw_footer(const Hint *hints, int n)
 {
@@ -298,10 +325,13 @@ static void draw_games(void)
         gfx_text(SCREEN_W / 2 - gfx_text_width(26, msg) / 2, 320, 26, C_SUB, msg);
     }
 
-    const int row_h = 132, top = HEADER_H + 24;
-    for (int i = 0; i < s_app.ngames; i++) {
+    const int row_h = 132, stride = row_h + 16;
+    const int visible = (LIST_BOTTOM + 40 - LIST_TOP + 16) / stride;
+    s_app.scroll_game = scroll_to(s_app.scroll_game, s_app.sel_game, visible);
+    gfx_set_clip(0, LIST_TOP - 8, SCREEN_W, LIST_BOTTOM + 48 - (LIST_TOP - 8));
+    for (int i = s_app.scroll_game; i < s_app.ngames && i < s_app.scroll_game + visible; i++) {
         const Game *g = &s_app.games[i];
-        int y = top + i * (row_h + 16);
+        int y = LIST_TOP + (i - s_app.scroll_game) * stride;
         bool sel = i == s_app.sel_game;
         if (sel)
             gfx_round_rect(MARGIN - 4, y - 4, SCREEN_W - 2 * MARGIN + 8, row_h + 8, 18, C_BORDER);
@@ -330,6 +360,8 @@ static void draw_games(void)
             draw_badge(tx + gfx_text_width(30, g->profile->name) + 16, y + 26, tr(STR_UNVERIFIED), C_ORANGE);
     }
 
+    gfx_reset_clip();
+    draw_scrollbar(s_app.scroll_game, visible, s_app.ngames);
     Hint hints[] = {{"A", tr(STR_HINT_OPEN)},       {"X", tr(STR_HINT_REFRESH)},
                     {"Y", tr(STR_HINT_LANGUAGE)},   {"-", tr(STR_HINT_SIGN_OUT)},
                     {"+", tr(STR_HINT_QUIT)}};
@@ -401,10 +433,14 @@ static void draw_game(void)
         gfx_text(MARGIN, HEADER_H + 40, 26, C_SUB, tr(STR_NO_SAVE_ANYWHERE));
     }
 
-    const int row_h = 116, top = HEADER_H + 24, col_switch = MARGIN + 300, col_steam = MARGIN + 740;
-    for (int i = 0; g->analyzed && g->plan_ok && i < g->plan.nitems; i++) {
+    const int row_h = 116, stride = row_h + 12, col_switch = MARGIN + 300, col_steam = MARGIN + 740;
+    const int visible = (LIST_BOTTOM - LIST_TOP + 12) / stride;
+    s_app.scroll_item = scroll_to(s_app.scroll_item, s_app.sel_item, visible);
+    gfx_set_clip(0, LIST_TOP - 8, SCREEN_W, LIST_BOTTOM - (LIST_TOP - 8));
+    for (int i = s_app.scroll_item; g->analyzed && g->plan_ok && i < g->plan.nitems &&
+                                    i < s_app.scroll_item + visible; i++) {
         const SyncItem *it = &g->plan.items[i];
-        int y = top + i * (row_h + 12);
+        int y = LIST_TOP + (i - s_app.scroll_item) * stride;
         bool sel = i == s_app.sel_item;
         if (sel)
             gfx_round_rect(MARGIN - 4, y - 4, SCREEN_W - 2 * MARGIN + 8, row_h + 8, 18, C_BORDER);
@@ -421,6 +457,10 @@ static void draw_game(void)
         // Symbole entre les deux colonnes : sens proposé, conflit ou égalité
         draw_direction(col_steam - 84, y + row_h / 2, it->status);
     }
+
+    gfx_reset_clip();
+    if (g->analyzed && g->plan_ok)
+        draw_scrollbar(s_app.scroll_item, visible, g->plan.nitems);
 
     // Raison du statut de l'emplacement sélectionné, et actions possibles
     if (g->analyzed && g->plan_ok && g->plan.nitems > 0) {
@@ -578,8 +618,20 @@ static void show_message(const char *title, const char *body, Color color)
 
 // ------------------------------------------------------------------ actions
 
+// Variables des chemins Steam Cloud ({64BitSteamID}...) pour le compte connecté
+static void set_steam_variables(void)
+{
+    unsigned long long id64 = strtoull(s_app.session.steamid, NULL, 10);
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%llu", id64);
+    pattern_set_variable("{64BitSteamID}", buf);
+    snprintf(buf, sizeof(buf), "%llu", id64 & 0xFFFFFFFFull);  // numéro de compte = 32 bits bas
+    pattern_set_variable("{Steam3AccountID}", buf);
+}
+
 static bool connect_steam(SteamCM *cm)
 {
+    set_steam_variables();
     render_busy(tr(STR_BUSY_CONNECTING));
     if (!cm_connect(cm)) {
         show_message(tr(STR_MSG_UNREACHABLE_TITLE), tr(STR_MSG_UNREACHABLE_BODY), C_RED);
@@ -608,6 +660,7 @@ static void refresh_games(void)
 {
     free_games();
     s_app.sel_game = s_app.sel_item = 0;
+    s_app.scroll_game = s_app.scroll_item = 0;
 
     int nsaves = saves_list(s_app.uid, s_app.saves, 256);
     for (int i = 0; i < nsaves && s_app.ngames < MAX_GAMES; i++) {
@@ -634,7 +687,7 @@ static void analyze_game(Game *g)
     sync_plan_free(&g->plan);
     g->analyzed = false;  // pas d'ancien résultat affiché pendant l'analyse
     g->plan_ok = false;
-    s_app.sel_item = 0;
+    s_app.sel_item = s_app.scroll_item = 0;
 
     SteamCM cm;
     if (!connect_steam(&cm)) {

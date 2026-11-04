@@ -316,7 +316,6 @@ static SyncItem *item_for(SyncPlan *plan, const ProfileMap *map, const PatternMa
     item->map = map;
     item->match = *m;
     item->match.rest[0] = '\0';
-    pattern_expand(map->steam, &item->match, "", item->state_key, sizeof(item->state_key));
 
     // Libellé : numéro d'emplacement si le motif en a un, sinon le premier nom capturé
     for (int i = 0; i < m->ncaps; i++)
@@ -348,6 +347,13 @@ bool sync_build_plan(SteamCM *cm, const GameProfile *profile, const SaveEntry *s
     plan->save = *save;
     saves_game_version(profile->title_id, plan->switch_version, sizeof(plan->switch_version));
 
+    // Jeu absent du compte Steam : aucune synchro possible (et surtout pas d'envoi)
+    if (cloud_owns_app(cm, profile->appid) == 0) {
+        plan->error = STR_ERR_NOT_OWNED;
+        log_printf("%s : pas sur ce compte Steam\n", profile->name);
+        return false;
+    }
+
     int ncloud = cloud_enumerate(cm, profile->appid, s_cloud, MAX_CLOUD_FILES);
     if (ncloud < 0) {
         plan->error = STR_ERR_CLOUD_LIST;
@@ -376,6 +382,8 @@ bool sync_build_plan(SteamCM *cm, const GameProfile *profile, const SaveEntry *s
             if (!pattern_match(map->steam, s_cloud[c].filename, &m) || !(item = item_for(plan, map, &m)) ||
                 !(f = add_file(&item->st, m.rest)))
                 continue;
+            if (!item->match.var[0])  // variable {…} telle qu'écrite dans le cloud
+                snprintf(item->match.var, sizeof(item->match.var), "%s", m.var);
             if (!cloud_download(cm, profile->appid, s_cloud[c].filename, &f->data, &f->len)) {
                 log_printf("%s : telechargement impossible\n", s_cloud[c].filename);
                 plan->error = STR_ERR_DOWNLOAD;
@@ -407,6 +415,12 @@ bool sync_build_plan(SteamCM *cm, const GameProfile *profile, const SaveEntry *s
 
     for (int i = 0; i < plan->nitems; i++) {
         SyncItem *item = &plan->items[i];
+        // Save présente seulement sur la Switch : variable {…} reprise d'une autre save du jeu
+        for (int j = 0; j < plan->nitems && !item->match.var[0]; j++)
+            if (plan->items[j].map == item->map && plan->items[j].match.var[0])
+                strcpy(item->match.var, plan->items[j].match.var);
+        if (!pattern_expand(item->map->steam, &item->match, "", item->state_key, sizeof(item->state_key)))
+            item->state_key[0] = '\0';
         finish_side(&item->sw, item->map->group);
         finish_side(&item->st, item->map->group);
         if (profile->converter == CONV_HOLLOW_KNIGHT) {

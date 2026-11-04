@@ -9,6 +9,10 @@ typedef struct {
     char sha[41];         // SHA-1 en hexadécimal
 } CloudFile;
 
+// Le jeu est-il sur le compte Steam connecté (achat, jeu gratuit ou bibliothèque familiale) ?
+// Retourne 1 = oui, 0 = non, -1 = impossible de le savoir.
+int cloud_owns_app(SteamCM *cm, uint32_t appid);
+
 // Liste les fichiers Steam Cloud d'un jeu. Retourne le nombre lu, ou -1 en cas d'erreur.
 int cloud_enumerate(SteamCM *cm, uint32_t appid, CloudFile *files, int max);
 

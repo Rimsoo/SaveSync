@@ -18,6 +18,36 @@
 #define F_FILE_SIZE 5
 #define F_FILE_SHA 10
 
+int cloud_owns_app(SteamCM *cm, uint32_t appid)
+{
+    PbBuf req = {0};
+    pb_varint(&req, 1, cm->steamid);   // steamid
+    pb_varint(&req, 3, 1);             // include_played_free_games
+    pb_varint(&req, 4, appid);         // appids_filter
+    pb_varint(&req, 5, 1);             // include_free_sub
+    pb_varint(&req, 6, 0);             // skip_unvetted_apps
+    pb_varint(&req, 9, 1);             // include_family_licenses
+
+    uint8_t *resp;
+    size_t resp_len;
+    int eresult = cm_call(cm, "Player.GetOwnedGames#1", &req, &resp, &resp_len);
+    pb_free(&req);
+    if (eresult != 1)
+        return -1;
+
+    int owned = 0;
+    PbReader r;
+    PbField f;
+    pb_reader(&r, resp, resp_len);
+    while (pb_next(&r, &f) && !owned) {
+        uint64_t game_appid = 0;
+        if (f.field == 2 && f.wire == PB_BYTES && pb_get_u64(f.data, f.len, 1, &game_appid))
+            owned = game_appid == appid;
+    }
+    free(resp);
+    return owned;
+}
+
 int cloud_enumerate(SteamCM *cm, uint32_t appid, CloudFile *files, int max)
 {
     int count = 0;

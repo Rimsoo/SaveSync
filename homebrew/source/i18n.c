@@ -29,6 +29,7 @@ static const char *const STRINGS[LANG_COUNT][STR_COUNT] = {
         [STR_ERR_DOWNLOAD] = "Steam download incomplete",
         [STR_ERR_STEAM_UNREACHABLE] = "Steam unreachable",
         [STR_ERR_ANALYSIS] = "Analysis failed",
+        [STR_ERR_NOT_OWNED] = "This game is not on your Steam account",
 
         [STR_STATUS_EQUAL] = "Up to date",
         [STR_STATUS_TO_SWITCH] = "To Switch",
@@ -128,6 +129,7 @@ static const char *const STRINGS[LANG_COUNT][STR_COUNT] = {
         [STR_ERR_DOWNLOAD] = "Téléchargement Steam incomplet",
         [STR_ERR_STEAM_UNREACHABLE] = "Steam injoignable",
         [STR_ERR_ANALYSIS] = "Analyse impossible",
+        [STR_ERR_NOT_OWNED] = "Ce jeu n'est pas sur ton compte Steam",
 
         [STR_STATUS_EQUAL] = "À jour",
         [STR_STATUS_TO_SWITCH] = "Vers la Switch",

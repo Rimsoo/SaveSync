@@ -24,6 +24,7 @@ typedef enum {
     STR_ERR_DOWNLOAD,
     STR_ERR_STEAM_UNREACHABLE,
     STR_ERR_ANALYSIS,
+    STR_ERR_NOT_OWNED,
 
     // Statuts
     STR_STATUS_EQUAL,

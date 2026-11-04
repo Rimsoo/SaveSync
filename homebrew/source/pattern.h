@@ -8,6 +8,9 @@
 //   *   un ou plusieurs caractères, sans '/' (nom de dossier ou de fichier)
 //   **  en fin de motif uniquement : tout le reste du chemin (contenu d'un dossier,
 //       synchronisé comme une seule save)
+//   {Nom}  variable Steam ({64BitSteamID}, {Steam3AccountID}) : correspond à n'importe quel
+//       nom (sans '/'), sans être capturée. La valeur trouvée est réutilisée à l'écriture ;
+//       à défaut, celle du compte connecté (pattern_set_variable).
 // Les jokers sont « capturés » dans l'ordre : le même ordre côté Steam et côté Switch
 // permet d'associer les fichiers des deux côtés.
 
@@ -19,7 +22,11 @@ typedef struct {
     char caps[PATTERN_MAX_CAPS][PATTERN_CAP_LEN];
     char kinds[PATTERN_MAX_CAPS];   // '#' ou '*'
     char rest[256];                 // partie capturée par "**" (vide sinon)
+    char var[32];                   // valeur trouvée pour une variable {Nom} (vide sinon)
 } PatternMatch;
+
+// Valeur par défaut d'une variable {Nom}, utilisée à l'écriture quand aucune n'a été trouvée
+void pattern_set_variable(const char *name, const char *value);
 
 bool pattern_match(const char *pattern, const char *text, PatternMatch *m);
 
