@@ -10,8 +10,8 @@
 | Absolum | `0100A83022A22000` | 1904480 | 🟡 unverified | `Save.bin` on both sides; format not tested |
 | Dispatch | `01008BA02525A000` | 2592160 | 🟡 unverified | Unreal Engine, `SaveSlot0` on Switch vs `SaveSlot0.sav` on PC |
 | Monument Valley 2 | `010078C021280000` | 1927740 | 🟡 unverified | `PLAYER_PROGRESS.json` on Switch; PC path contains `{64BitSteamID}` |
-| Hades II | `0100A00019DE0000` | 1145350 | 🟡 unverified | `ProfileN.sav` + `.v.sav` + `_Temp.sav` synced together (`combine = yes`); Supergiant's format (`SGB1` header) |
-| Hades | `0100535012974000` | 1145360 | 🟡 unverified | Same layout as Hades II |
+| Hades II | `0100A00019DE0000` | 1145350 | ✅ verified | `ProfileN.sav` + `.v.sav` + `_Temp.sav` synced together (`combine = yes`); Supergiant's format (`SGB1` header) |
+| Hades | `0100535012974000` | 1145360 | 🟡 unverified | Same layout as Hades II (verified) |
 
 Tested one of the unverified games? Please open an issue with the result (which direction,
 did the game load the save?) so it can be marked as verified or fixed.

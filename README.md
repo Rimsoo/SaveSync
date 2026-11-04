@@ -34,8 +34,9 @@ Game profiles live in [`homebrew/romfs/games.ini`](homebrew/romfs/games.ini).
 |---|---|---|
 | Hollow Knight | ✅ verified | PC (AES-encrypted) ↔ Switch (plain JSON) |
 | Nine Sols | ✅ verified | none (same format) |
+| Hades II | ✅ verified | none (multi-file slots) |
 | Hollow Knight: Silksong | 🟡 unverified | same as Hollow Knight |
-| Hades, Hades II | 🟡 unverified | none (multi-file slots) |
+| Hades | 🟡 unverified | none (multi-file slots) |
 | Absolum, Dispatch, Monument Valley 2 | 🟡 unverified | none |
 
 See [docs/GAMES.md](docs/GAMES.md) for details and the **wanted list**: games whose Steam
