@@ -16,6 +16,7 @@ typedef enum {
 
 // Un fichier d'une save. `rel` : chemin dans le groupe (vide pour une save d'un seul fichier).
 typedef struct {
+    const ProfileMap *map;  // ligne map du profil qui décrit ce fichier
     char rel[160];
     uint8_t *data;    // terminé par un '\0' supplémentaire (lecture du JSON en place)
     size_t len;
@@ -43,6 +44,7 @@ typedef struct {
     char state_key[PROFILE_PATH_LEN];
     char label[64];              // "3" pour un emplacement numéroté, sinon un nom
     bool numbered;
+    bool multi;                  // save en plusieurs fichiers (dossier ** ou profil combine)
     SyncSide sw, st;
     bool has_state;              // déjà synchronisé une fois
     char last_sw[41], last_st[41];

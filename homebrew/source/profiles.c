@@ -51,6 +51,8 @@ static bool validate(GameProfile *p, const char *file)
         problem = "steam = AppID manquant";
     else if (p->nmaps == 0)
         problem = "aucune ligne map valide";
+    if (!problem && p->combine && p->converter != CONV_NONE)
+        problem = "un convertisseur ne s'applique qu'a des saves d'un seul fichier (pas combine)";
     for (int i = 0; !problem && i < p->nmaps; i++)
         if (p->maps[i].group && p->converter != CONV_NONE)
             problem = "un convertisseur ne s'applique qu'a des fichiers seuls, pas a un dossier (**)";
@@ -115,6 +117,8 @@ static void load_file(const char *path)
             cur.appid = strtoul(value, NULL, 10);
         } else if (strcmp(key, "converter") == 0) {
             cur.converter = strcmp(value, "hollow_knight") == 0 ? CONV_HOLLOW_KNIGHT : CONV_NONE;
+        } else if (strcmp(key, "combine") == 0) {
+            cur.combine = strcmp(value, "yes") == 0;
         } else if (strcmp(key, "status") == 0) {
             cur.verified = strcmp(value, "verified") == 0;
         } else if (strcmp(key, "slot_offset") == 0) {

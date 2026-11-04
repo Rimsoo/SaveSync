@@ -39,9 +39,17 @@ static void free_side(SyncSide *side)
     memset(side, 0, sizeof(*side));
 }
 
+// Deux fichiers d'une même save sont identifiés par leur ligne map et leur chemin relatif
+static bool same_file(const SyncFile *a, const SyncFile *b)
+{
+    return a->map == b->map && strcmp(a->rel, b->rel) == 0;
+}
+
 static int compare_files(const void *a, const void *b)
 {
-    return strcmp(((const SyncFile *)a)->rel, ((const SyncFile *)b)->rel);
+    const SyncFile *x = a, *y = b;
+    int c = strcmp(x->map->sw, y->map->sw);
+    return c ? c : strcmp(x->rel, y->rel);
 }
 
 // Empreinte d'une save : celle du fichier seul (compatible avec les états déjà enregistrés),
@@ -66,6 +74,7 @@ static void finish_side(SyncSide *side, bool group)
     Sha1Context ctx;
     sha1ContextCreate(&ctx);
     for (int i = 0; i < side->nfiles; i++) {
+        sha1ContextUpdate(&ctx, side->files[i].map->sw, strlen(side->files[i].map->sw) + 1);
         sha1ContextUpdate(&ctx, side->files[i].rel, strlen(side->files[i].rel) + 1);
         sha1ContextUpdate(&ctx, side->files[i].sha, 40);
     }
@@ -75,12 +84,13 @@ static void finish_side(SyncSide *side, bool group)
         sprintf(side->sha + 2 * i, "%02x", sha[i]);
 }
 
-static SyncFile *add_file(SyncSide *side, const char *rel)
+static SyncFile *add_file(SyncSide *side, const ProfileMap *map, const char *rel)
 {
     if (side->nfiles >= SYNC_MAX_FILES)
         return NULL;
     SyncFile *f = &side->files[side->nfiles++];
     memset(f, 0, sizeof(*f));
+    f->map = map;
     fsutil_copy_str(f->rel, sizeof(f->rel), rel);
     return f;
 }
@@ -306,7 +316,7 @@ static bool same_caps(const PatternMatch *a, const PatternMatch *b)
 static SyncItem *item_for(SyncPlan *plan, const ProfileMap *map, const PatternMatch *m)
 {
     for (int i = 0; i < plan->nitems; i++)
-        if (plan->items[i].map == map && same_caps(&plan->items[i].match, m))
+        if ((plan->profile->combine || plan->items[i].map == map) && same_caps(&plan->items[i].match, m))
             return &plan->items[i];
     if (plan->nitems >= SYNC_MAX_ITEMS)
         return NULL;
@@ -314,6 +324,7 @@ static SyncItem *item_for(SyncPlan *plan, const ProfileMap *map, const PatternMa
     SyncItem *item = &plan->items[plan->nitems++];
     memset(item, 0, sizeof(*item));
     item->map = map;
+    item->multi = map->group || plan->profile->combine;
     item->match = *m;
     item->match.rest[0] = '\0';
 
@@ -380,7 +391,7 @@ bool sync_build_plan(SteamCM *cm, const GameProfile *profile, const SaveEntry *s
             SyncItem *item;
             SyncFile *f;
             if (!pattern_match(map->steam, s_cloud[c].filename, &m) || !(item = item_for(plan, map, &m)) ||
-                !(f = add_file(&item->st, m.rest)))
+                !(f = add_file(&item->st, map, m.rest)))
                 continue;
             if (!item->match.var[0])  // variable {…} telle qu'écrite dans le cloud
                 snprintf(item->match.var, sizeof(item->match.var), "%s", m.var);
@@ -405,7 +416,7 @@ bool sync_build_plan(SteamCM *cm, const GameProfile *profile, const SaveEntry *s
             SyncItem *item;
             SyncFile *f;
             if (!pattern_match(map->sw, s_switch_files[i], &m) || !(item = item_for(plan, map, &m)) ||
-                !(f = add_file(&item->sw, m.rest)))
+                !(f = add_file(&item->sw, map, m.rest)))
                 continue;
             if (!read_switch_file(s_switch_files[i], f))
                 item->sw.nfiles--;
@@ -419,10 +430,11 @@ bool sync_build_plan(SteamCM *cm, const GameProfile *profile, const SaveEntry *s
         for (int j = 0; j < plan->nitems && !item->match.var[0]; j++)
             if (plan->items[j].map == item->map && plan->items[j].match.var[0])
                 strcpy(item->match.var, plan->items[j].match.var);
-        if (!pattern_expand(item->map->steam, &item->match, "", item->state_key, sizeof(item->state_key)))
+        const ProfileMap *key_map = plan->profile->combine ? &profile->maps[0] : item->map;
+        if (!pattern_expand(key_map->steam, &item->match, "", item->state_key, sizeof(item->state_key)))
             item->state_key[0] = '\0';
-        finish_side(&item->sw, item->map->group);
-        finish_side(&item->st, item->map->group);
+        finish_side(&item->sw, item->multi);
+        finish_side(&item->st, item->multi);
         if (profile->converter == CONV_HOLLOW_KNIGHT) {
             hk_side_info(&item->sw);
             hk_side_info(&item->st);
@@ -522,7 +534,7 @@ static bool convert_side(const SyncPlan *plan, const SyncSide *src, SyncDirectio
 {
     memset(out, 0, sizeof(*out));
     for (int i = 0; i < src->nfiles; i++) {
-        SyncFile *f = add_file(out, src->files[i].rel);
+        SyncFile *f = add_file(out, src->files[i].map, src->files[i].rel);
         if (!f || !convert_file(plan, &src->files[i], dir, &f->data, &f->len)) {
             if (f)
                 out->nfiles--;
@@ -557,16 +569,17 @@ static bool apply_to_switch(SyncPlan *plan, SyncItem *item, SyncSide *data, cons
     bool ok = true;
     char rel[FS_MAX_PATH], path[DEV_PATH_MAX];
     for (int i = 0; ok && i < data->nfiles; i++) {
-        ok = pattern_expand(item->map->sw, &item->match, data->files[i].rel, rel, sizeof(rel));
+        ok = pattern_expand(data->files[i].map->sw, &item->match, data->files[i].rel, rel, sizeof(rel));
         snprintf(path, sizeof(path), SAVE_DEVICE ":/%s", rel);
         ok = ok && fsutil_write_verified(path, data->files[i].data, data->files[i].len);
     }
     // Pour un dossier : les fichiers qui n'existent plus côté source sont retirés (ils sont sauvegardés)
-    for (int i = 0; ok && item->map->group && i < item->sw.nfiles; i++) {
+    for (int i = 0; ok && item->multi && i < item->sw.nfiles; i++) {
         bool kept = false;
         for (int j = 0; j < data->nfiles && !kept; j++)
-            kept = strcmp(item->sw.files[i].rel, data->files[j].rel) == 0;
-        if (!kept && pattern_expand(item->map->sw, &item->match, item->sw.files[i].rel, rel, sizeof(rel))) {
+            kept = same_file(&item->sw.files[i], &data->files[j]);
+        if (!kept &&
+            pattern_expand(item->sw.files[i].map->sw, &item->match, item->sw.files[i].rel, rel, sizeof(rel))) {
             snprintf(path, sizeof(path), SAVE_DEVICE ":/%s", rel);
             remove(path);
         }
@@ -587,8 +600,8 @@ static bool apply_to_switch(SyncPlan *plan, SyncItem *item, SyncSide *data, cons
     SyncSide check = {0};
     ok = R_SUCCEEDED(saves_mount(&plan->save, SAVE_DEVICE));
     for (int i = 0; ok && i < data->nfiles; i++) {
-        SyncFile *f = add_file(&check, data->files[i].rel);
-        ok = f && pattern_expand(item->map->sw, &item->match, data->files[i].rel, rel, sizeof(rel)) &&
+        SyncFile *f = add_file(&check, data->files[i].map, data->files[i].rel);
+        ok = f && pattern_expand(data->files[i].map->sw, &item->match, data->files[i].rel, rel, sizeof(rel)) &&
              read_switch_file(rel, f) && strcmp(f->sha, data->files[i].sha) == 0;
     }
     saves_unmount(SAVE_DEVICE);
@@ -597,7 +610,7 @@ static bool apply_to_switch(SyncPlan *plan, SyncItem *item, SyncSide *data, cons
         free_side(&check);
         return false;
     }
-    finish_side(&check, item->map->group);
+    finish_side(&check, item->multi);
     free_side(&item->sw);
     item->sw = check;
     if (plan->profile->converter == CONV_HOLLOW_KNIGHT)
@@ -613,7 +626,7 @@ static bool apply_to_steam(SteamCM *cm, SyncPlan *plan, SyncItem *item, SyncSide
     // 1. Sauvegarde des fichiers Steam actuels (déjà téléchargés et vérifiés pour le plan)
     for (int i = 0; i < item->st.nfiles; i++) {
         char dst[FS_MAX_PATH];
-        pattern_expand(item->map->steam, &item->match, item->st.files[i].rel, name, sizeof(name));
+        pattern_expand(item->st.files[i].map->steam, &item->match, item->st.files[i].rel, name, sizeof(name));
         for (char *p = name; *p; p++)
             if (*p == '%' || *p == ':')
                 *p = '_';
@@ -630,7 +643,8 @@ static bool apply_to_steam(SteamCM *cm, SyncPlan *plan, SyncItem *item, SyncSide
     static char names[SYNC_MAX_FILES][FS_MAX_PATH];
     const char *list[SYNC_MAX_FILES];
     for (int i = 0; i < data->nfiles; i++) {
-        if (!pattern_expand(item->map->steam, &item->match, data->files[i].rel, names[i], sizeof(names[i])))
+        if (!pattern_expand(data->files[i].map->steam, &item->match, data->files[i].rel, names[i],
+                            sizeof(names[i])))
             return false;
         list[i] = names[i];
     }
@@ -666,7 +680,7 @@ static bool apply_to_steam(SteamCM *cm, SyncPlan *plan, SyncItem *item, SyncSide
     for (int i = 0; i < item->st.nfiles; i++) {
         bool replaced = false;
         for (int j = 0; j < data->nfiles && !replaced; j++)
-            replaced = strcmp(item->st.files[i].rel, data->files[j].rel) == 0;
+            replaced = same_file(&item->st.files[i], &data->files[j]);
         if (!replaced && data->nfiles < SYNC_MAX_FILES) {
             data->files[data->nfiles++] = item->st.files[i];  // le fichier change de propriétaire
             item->st.files[i].data = NULL;
@@ -675,7 +689,7 @@ static bool apply_to_steam(SteamCM *cm, SyncPlan *plan, SyncItem *item, SyncSide
     free_side(&item->st);
     item->st = *data;
     memset(data, 0, sizeof(*data));
-    finish_side(&item->st, item->map->group);
+    finish_side(&item->st, item->multi);
     if (plan->profile->converter == CONV_HOLLOW_KNIGHT)
         hk_side_info(&item->st);
     return true;

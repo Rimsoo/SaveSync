@@ -35,6 +35,7 @@ Game profiles live in [`homebrew/romfs/games.ini`](homebrew/romfs/games.ini).
 | Hollow Knight | ✅ verified | PC (AES-encrypted) ↔ Switch (plain JSON) |
 | Nine Sols | ✅ verified | none (same format) |
 | Hollow Knight: Silksong | 🟡 unverified | same as Hollow Knight |
+| Hades, Hades II | 🟡 unverified | none (multi-file slots) |
 | Absolum, Dispatch, Monument Valley 2 | 🟡 unverified | none |
 
 See [docs/GAMES.md](docs/GAMES.md) for details and the **wanted list**: games whose Steam
@@ -61,7 +62,8 @@ open an issue to report whether it works, so it can be marked as verified.
    map = %WinAppDataRoaming%StardewValley/Saves/*/** => */**
    ```
    In patterns, `#` matches a slot number, `*` a name, and a final `**` a whole folder synced
-   as one save. You can test a profile without rebuilding by putting it in
+   as one save. `combine = yes` groups several files of the same slot into one save, and
+   Steam variables like `{Steam3AccountID}` are supported. You can test a profile without rebuilding by putting it in
    `sdmc:/switch/savesync/games.ini` on the SD card (it overrides the built-in list).
 4. Only map real save slots — never settings files or the backup copies the PC game makes.
 

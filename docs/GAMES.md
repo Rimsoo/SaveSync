@@ -10,6 +10,8 @@
 | Absolum | `0100A83022A22000` | 1904480 | 🟡 unverified | `Save.bin` on both sides; format not tested |
 | Dispatch | `01008BA02525A000` | 2592160 | 🟡 unverified | Unreal Engine, `SaveSlot0` on Switch vs `SaveSlot0.sav` on PC |
 | Monument Valley 2 | `010078C021280000` | 1927740 | 🟡 unverified | `PLAYER_PROGRESS.json` on Switch; PC path contains `{64BitSteamID}` |
+| Hades II | `0100A00019DE0000` | 1145350 | 🟡 unverified | `ProfileN.sav` + `.v.sav` + `_Temp.sav` synced together (`combine = yes`); Supergiant's format (`SGB1` header) |
+| Hades | `0100535012974000` | 1145360 | 🟡 unverified | Same layout as Hades II |
 
 Tested one of the unverified games? Please open an issue with the result (which direction,
 did the game load the save?) so it can be marked as verified or fixed.
@@ -39,7 +41,11 @@ Switch save** (list the files of a JKSV backup) and whether the format is the sa
 | Vampire Survivors | `010089A0197E4000` | 1794680 | several rules incl. `%WinAppDataRoaming%Vampire_Survivors_{Steam3AccountID}/*.sav` | Unknown |
 | DELTARUNE | `0100A0D022A68000` | 1671210 | `%WinAppDataLocal%DELTARUNE/*` | Unknown |
 
-Not needed: **Hades** has official cross-save between PC and Switch.
+About **Hades / Hades II**: the official cross-save only works with the online service,
+so it is not available on a console kept offline; their profiles use the file names that
+Supergiant's cross-save itself exchanges.
+
+Games shared through **Steam Families** count as owned: they can be synced too.
 Not possible yet: games whose Steam Cloud files are named by the game itself (Undertale,
 Dead Cells, Terraria, Dave the Diver, Moonlighter…) — their names are only visible to an
 account that owns the game (`tools/steamcloud.py cm-list <appid>`).

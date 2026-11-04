@@ -28,6 +28,7 @@ typedef struct {
     uint32_t appid;       // AppID Steam
     Converter converter;
     bool verified;        // testé pour de vrai dans les deux sens
+    bool combine;         // les lignes map de même numéro d'emplacement forment une seule save
     int nmaps;
     ProfileMap maps[PROFILE_MAX_MAPS];
 } GameProfile;
