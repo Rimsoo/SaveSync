@@ -32,6 +32,8 @@
 #define C_ORANGE RGB(0xff, 0xb0, 0x20)
 #define C_RED RGB(0xff, 0x5f, 0x5f)
 #define C_OVERLAY RGBA(0, 0, 0, 170)
+#define C_BUTTON RGB(0x2a, 0x31, 0x40)
+#define C_BUTTON_DOWN RGB(0x3b, 0x46, 0x5c)
 
 #define MARGIN 48
 #define HEADER_H 96
@@ -70,7 +72,8 @@ static struct {
     Game games[MAX_GAMES];
     int ngames;
     int sel_game, sel_item;
-    int scroll_game, scroll_item;  // première ligne visible de chaque liste
+    int scroll_game, scroll_item;  // défilement de chaque liste, en pixels
+    bool follow_sel;               // la liste défile pour garder la sélection visible
 
     // Connexion par QR
     SteamQrLogin qr;
@@ -84,6 +87,68 @@ static struct {
     char msg_title[64], msg_body[256];
     Color msg_color;
 } s_app;
+
+// ------------------------------------------------------------------ écran tactile
+
+// Zones touchables, enregistrées pendant le dessin : elles décrivent toujours l'image
+// affichée. Un appui sur un bouton simule la touche correspondante de la manette.
+typedef enum { HIT_BUTTON, HIT_GAME, HIT_ITEM } HitKind;
+
+typedef struct {
+    int x, y, w, h;
+    HitKind kind;
+    u64 button;  // HIT_BUTTON : touche simulée (0 = zone qui absorbe l'appui)
+    int row;     // HIT_GAME, HIT_ITEM : ligne de la liste
+} HitZone;
+
+#define MAX_ZONES 32
+#define TAP_SLOP 20          // déplacement (px) au-delà duquel un appui devient un glissement
+#define FLICK_FRICTION 0.95f  // ralentissement par image après un lancer
+#define FLICK_MIN 0.5f        // vitesse (px/image) sous laquelle le défilement s'arrête
+#define FLICK_MAX 80.0f
+
+static struct {
+    HitZone zones[MAX_ZONES];
+    int nzones;
+
+    // Liste défilante de l'écran affiché (NULL si aucune)
+    int *scroll;
+    int scroll_max;
+    int list_y, list_h;
+
+    bool down;      // doigt posé
+    bool can_tap;   // encore un appui simple : pas de glissement, pas d'arrêt d'un lancer
+    bool dragging;  // le doigt fait défiler la liste
+    int x0, y0;     // point de départ
+    int x, y;       // dernière position
+    float velocity;  // px par image, défilement qui continue après le lâcher
+} s_touch;
+
+static void hit_add(int x, int y, int w, int h, HitKind kind, u64 button, int row)
+{
+    if (s_touch.nzones < MAX_ZONES)
+        s_touch.zones[s_touch.nzones++] = (HitZone){x, y, w, h, kind, button, row};
+}
+
+// Ligne d'une liste : seule sa partie visible (dans la zone de la liste) est touchable
+static void hit_add_row(int x, int y, int w, int h, HitKind kind, int row)
+{
+    int top = y > s_touch.list_y ? y : s_touch.list_y;
+    int bottom = y + h < s_touch.list_y + s_touch.list_h ? y + h : s_touch.list_y + s_touch.list_h;
+    if (bottom > top)
+        hit_add(x, top, w, bottom - top, kind, 0, row);
+}
+
+static bool in_rect(int px, int py, int x, int y, int w, int h)
+{
+    return px >= x && py >= y && px < x + w && py < y + h;
+}
+
+// Le doigt appuie sur cette zone (pour dessiner le bouton enfoncé)
+static bool touch_pressing(int x, int y, int w, int h)
+{
+    return s_touch.down && s_touch.can_tap && in_rect(s_touch.x0, s_touch.y0, x, y, w, h);
+}
 
 // ------------------------------------------------------------------ textes et formats
 
@@ -154,19 +219,38 @@ static void item_label(const SyncItem *it, char *out, size_t len)
         snprintf(out, len, "%s", it->label);
 }
 
-// Fait défiler une liste pour que la ligne sélectionnée reste visible
-static int scroll_to(int scroll, int sel, int visible)
-{
-    if (sel < scroll)
-        return sel;
-    if (sel >= scroll + visible)
-        return sel - visible + 1;
-    return scroll;
-}
-
 // Zone entre l'en-tête et le pied de page
 #define LIST_TOP (HEADER_H + 24)
 #define LIST_BOTTOM (SCREEN_H - FOOTER_H - 56)
+
+// Prépare le dessin d'une liste de n lignes espacées de stride (dont gap vide entre deux
+// lignes), avec visible lignes à l'écran. Le défilement suit la sélection après une action
+// à la manette, reste dans les bornes et la liste devient déplaçable au doigt.
+// Retourne la hauteur affichée ; le dessin est limité à la liste jusqu'à gfx_reset_clip.
+static int list_begin(int *scroll, int sel, int n, int stride, int gap, int visible)
+{
+    int view_h = visible * stride - gap;
+    if (s_app.follow_sel) {
+        if (sel * stride < *scroll)
+            *scroll = sel * stride;
+        else if (sel * stride + stride - gap > *scroll + view_h)
+            *scroll = sel * stride + stride - gap - view_h;
+    }
+    int max = n * stride - gap - view_h;
+    if (max < 0)
+        max = 0;
+    if (*scroll > max)
+        *scroll = max;
+    if (*scroll < 0)
+        *scroll = 0;
+
+    s_touch.scroll = scroll;
+    s_touch.scroll_max = max;
+    s_touch.list_y = LIST_TOP - 8;
+    s_touch.list_h = view_h + 16;  // marge pour le contour de la sélection
+    gfx_set_clip(0, s_touch.list_y, SCREEN_W, s_touch.list_h);
+    return view_h;
+}
 
 // ------------------------------------------------------------------ éléments graphiques
 
@@ -177,19 +261,64 @@ static void draw_badge(int x, int y, const char *text, Color c)
     gfx_text(x + 12, y + 4, 20, c, text);
 }
 
-// Bouton façon Switch : rond avec la lettre, puis le libellé. Retourne la largeur.
-static int draw_hint(int x, int y, const char *button, const char *label)
-{
-    gfx_circle(x + 16, y + 16, 16, C_TEXT);
-    int bw = gfx_text_width(20, button);
-    gfx_text(x + 16 - bw / 2, y + 4, 20, C_BG, button);
-    return 40 + gfx_text(x + 40, y + 4, 22, C_TEXT, label) + 32;
-}
-
 typedef struct {
     const char *button, *label;
 } Hint;
 
+#define BTN_H 48
+#define BTN_GAP 12
+
+static u64 hint_button(const char *glyph)
+{
+    switch (glyph[0]) {
+    case 'A': return HidNpadButton_A;
+    case 'B': return HidNpadButton_B;
+    case 'X': return HidNpadButton_X;
+    case 'Y': return HidNpadButton_Y;
+    case '+': return HidNpadButton_Plus;
+    case '-': return HidNpadButton_Minus;
+    }
+    return 0;
+}
+
+static int hint_width(const Hint *h)
+{
+    return 8 + 32 + 10 + gfx_text_width(22, h->label) + 18;
+}
+
+// Bouton façon Switch, touchable : rond avec la lettre, puis le libellé, dans une pastille.
+static void draw_hint(int x, int y, const Hint *h)
+{
+    int w = hint_width(h);
+    // Zone touchable un peu plus grande que la pastille
+    int zx = x - BTN_GAP / 2, zy = y - 10, zw = w + BTN_GAP, zh = BTN_H + 20;
+    if (touch_pressing(zx, zy, zw, zh)) {
+        gfx_round_rect(x - 2, y - 2, w + 4, BTN_H + 4, BTN_H / 2 + 2, C_BORDER);
+        gfx_round_rect(x, y, w, BTN_H, BTN_H / 2, C_BUTTON_DOWN);
+    } else {
+        gfx_round_rect(x, y, w, BTN_H, BTN_H / 2, C_BUTTON);
+    }
+    gfx_circle(x + 24, y + BTN_H / 2, 16, C_TEXT);
+    int bw = gfx_text_width(20, h->button);
+    gfx_text(x + 24 - bw / 2, y + BTN_H / 2 - 12, 20, C_BG, h->button);
+    gfx_text(x + 50, y + BTN_H / 2 - 12, 22, C_TEXT, h->label);
+    hit_add(zx, zy, zw, zh, HIT_BUTTON, hint_button(h->button), -1);
+}
+
+// Rangée de boutons alignée à droite sur right, comme les menus de la Switch
+static void draw_hints(int right, int y, const Hint *hints, int n)
+{
+    int total = (n - 1) * BTN_GAP;
+    for (int i = 0; i < n; i++)
+        total += hint_width(&hints[i]);
+    int x = right - total;
+    for (int i = 0; i < n; i++) {
+        draw_hint(x, y, &hints[i]);
+        x += hint_width(&hints[i]) + BTN_GAP;
+    }
+}
+
+// scroll, visible et total en pixels
 static void draw_scrollbar(int scroll, int visible, int total)
 {
     if (total <= visible)
@@ -204,13 +333,7 @@ static void draw_scrollbar(int scroll, int visible, int total)
 static void draw_footer(const Hint *hints, int n)
 {
     gfx_rect(MARGIN, SCREEN_H - FOOTER_H, SCREEN_W - 2 * MARGIN, 1, C_DIM);
-    // Aligné à droite, comme les menus de la Switch
-    int total = 0;
-    for (int i = 0; i < n; i++)
-        total += 40 + gfx_text_width(22, hints[i].label) + 32;
-    int x = SCREEN_W - MARGIN - total + 32;
-    for (int i = 0; i < n; i++)
-        x += draw_hint(x, SCREEN_H - FOOTER_H + 20, hints[i].button, hints[i].label);
+    draw_hints(SCREEN_W - MARGIN, SCREEN_H - FOOTER_H + (FOOTER_H - BTN_H) / 2, hints, n);
 }
 
 static void draw_header(const char *title, const char *subtitle, const GfxImage *icon)
@@ -327,11 +450,13 @@ static void draw_games(void)
 
     const int row_h = 132, stride = row_h + 16;
     const int visible = (LIST_BOTTOM + 40 - LIST_TOP + 16) / stride;
-    s_app.scroll_game = scroll_to(s_app.scroll_game, s_app.sel_game, visible);
-    gfx_set_clip(0, LIST_TOP - 8, SCREEN_W, LIST_BOTTOM + 48 - (LIST_TOP - 8));
-    for (int i = s_app.scroll_game; i < s_app.ngames && i < s_app.scroll_game + visible; i++) {
+    const int view_h = list_begin(&s_app.scroll_game, s_app.sel_game, s_app.ngames, stride, 16, visible);
+    for (int i = s_app.scroll_game / stride; i < s_app.ngames; i++) {
         const Game *g = &s_app.games[i];
-        int y = LIST_TOP + (i - s_app.scroll_game) * stride;
+        int y = LIST_TOP + i * stride - s_app.scroll_game;
+        if (y >= LIST_TOP + view_h + 8)
+            break;
+        hit_add_row(MARGIN, y, SCREEN_W - 2 * MARGIN, row_h, HIT_GAME, i);
         bool sel = i == s_app.sel_game;
         if (sel)
             gfx_round_rect(MARGIN - 4, y - 4, SCREEN_W - 2 * MARGIN + 8, row_h + 8, 18, C_BORDER);
@@ -361,7 +486,7 @@ static void draw_games(void)
     }
 
     gfx_reset_clip();
-    draw_scrollbar(s_app.scroll_game, visible, s_app.ngames);
+    draw_scrollbar(s_app.scroll_game, visible * stride, s_app.ngames * stride);
     Hint hints[] = {{"A", tr(STR_HINT_OPEN)},       {"X", tr(STR_HINT_REFRESH)},
                     {"Y", tr(STR_HINT_LANGUAGE)},   {"-", tr(STR_HINT_SIGN_OUT)},
                     {"+", tr(STR_HINT_QUIT)}};
@@ -435,12 +560,14 @@ static void draw_game(void)
 
     const int row_h = 116, stride = row_h + 12, col_switch = MARGIN + 300, col_steam = MARGIN + 740;
     const int visible = (LIST_BOTTOM - LIST_TOP + 12) / stride;
-    s_app.scroll_item = scroll_to(s_app.scroll_item, s_app.sel_item, visible);
-    gfx_set_clip(0, LIST_TOP - 8, SCREEN_W, LIST_BOTTOM - (LIST_TOP - 8));
-    for (int i = s_app.scroll_item; g->analyzed && g->plan_ok && i < g->plan.nitems &&
-                                    i < s_app.scroll_item + visible; i++) {
+    const int nitems = g->analyzed && g->plan_ok ? g->plan.nitems : 0;
+    const int view_h = list_begin(&s_app.scroll_item, s_app.sel_item, nitems, stride, 12, visible);
+    for (int i = s_app.scroll_item / stride; i < nitems; i++) {
         const SyncItem *it = &g->plan.items[i];
-        int y = LIST_TOP + (i - s_app.scroll_item) * stride;
+        int y = LIST_TOP + i * stride - s_app.scroll_item;
+        if (y >= LIST_TOP + view_h + 8)
+            break;
+        hit_add_row(MARGIN, y, SCREEN_W - 2 * MARGIN, row_h, HIT_ITEM, i);
         bool sel = i == s_app.sel_item;
         if (sel)
             gfx_round_rect(MARGIN - 4, y - 4, SCREEN_W - 2 * MARGIN + 8, row_h + 8, 18, C_BORDER);
@@ -460,7 +587,7 @@ static void draw_game(void)
 
     gfx_reset_clip();
     if (g->analyzed && g->plan_ok)
-        draw_scrollbar(s_app.scroll_item, visible, g->plan.nitems);
+        draw_scrollbar(s_app.scroll_item, visible * stride, g->plan.nitems * stride);
 
     // Raison du statut de l'emplacement sélectionné, et actions possibles
     if (g->analyzed && g->plan_ok && g->plan.nitems > 0) {
@@ -486,12 +613,18 @@ static void draw_game(void)
 
 // ------------------------------------------------------------------ fenêtres
 
-static void draw_dialog_box(int w, int h, int *x, int *y)
+// Fenêtre par-dessus l'écran, qui seule reste touchable. Un appui hors de la fenêtre
+// simule la touche outside, un appui dans la fenêtre (hors boutons) la touche inside.
+static void draw_dialog_box(int w, int h, int *x, int *y, u64 outside, u64 inside)
 {
     gfx_rect(0, 0, SCREEN_W, SCREEN_H, C_OVERLAY);
     *x = (SCREEN_W - w) / 2;
     *y = (SCREEN_H - h) / 2;
     gfx_round_rect(*x, *y, w, h, 20, C_PANEL);
+    s_touch.nzones = 0;
+    s_touch.scroll = NULL;
+    hit_add(0, 0, SCREEN_W, SCREEN_H, HIT_BUTTON, outside, -1);
+    hit_add(*x, *y, w, h, HIT_BUTTON, inside, -1);
 }
 
 static void draw_confirm_sync(void)
@@ -503,7 +636,7 @@ static void draw_confirm_sync(void)
     const SyncSide *dst = to_steam ? &it->st : &it->sw;
 
     int x, y, w = 900, h = g->profile->verified ? 380 : 414;
-    draw_dialog_box(w, h, &x, &y);
+    draw_dialog_box(w, h, &x, &y, HidNpadButton_B, 0);
     const char *title = tr(to_steam ? STR_CONFIRM_TO_STEAM : STR_CONFIRM_TO_SWITCH);
     gfx_text(x + 40, y + 32, 34, C_TEXT, title);
     char line[256], slot[96];
@@ -534,16 +667,15 @@ static void draw_confirm_sync(void)
     }
     gfx_text(x + 40, ty, 22, C_GREEN, tr(dst->exists ? STR_BACKUP_NOTE : STR_EMPTY_NOTE));
 
-    int hx = x + w - 40 - 2 * 32 - 80 - gfx_text_width(22, tr(STR_HINT_CONFIRM)) -
-             gfx_text_width(22, tr(STR_HINT_CANCEL));
-    hx += draw_hint(hx, y + h - 64, "A", tr(STR_HINT_CONFIRM));
-    draw_hint(hx, y + h - 64, "B", tr(STR_HINT_CANCEL));
+    Hint hints[] = {{"A", tr(STR_HINT_CONFIRM)}, {"B", tr(STR_HINT_CANCEL)}};
+    draw_hints(x + w - 40, y + h - BTN_H - 20, hints, 2);
 }
 
 static void draw_message(void)
 {
     int x, y, w = 760, h = 260;
-    draw_dialog_box(w, h, &x, &y);
+    // Un appui n'importe où ferme le message
+    draw_dialog_box(w, h, &x, &y, HidNpadButton_A, HidNpadButton_A);
     gfx_text(x + 40, y + 32, 32, s_app.msg_color, s_app.msg_title);
     // Corps sur plusieurs lignes (séparées par '\n')
     char body[256];
@@ -551,26 +683,27 @@ static void draw_message(void)
     int ly = y + 92;
     for (char *line = strtok(body, "\n"); line; line = strtok(NULL, "\n"), ly += 32)
         gfx_text_fit(x + 40, ly, 22, C_TEXT, line, w - 80);
-    draw_hint(x + w - 80 - gfx_text_width(22, tr(STR_HINT_OK)), y + h - 64, "A", tr(STR_HINT_OK));
+    Hint hint = {"A", tr(STR_HINT_OK)};
+    draw_hints(x + w - 40, y + h - BTN_H - 20, &hint, 1);
 }
 
 static void draw_confirm_logout(void)
 {
     int x, y, w = 760, h = 260;
-    draw_dialog_box(w, h, &x, &y);
+    draw_dialog_box(w, h, &x, &y, HidNpadButton_B, 0);
     gfx_text(x + 40, y + 32, 32, C_TEXT, tr(STR_LOGOUT_TITLE));
     gfx_text(x + 40, y + 92, 22, C_SUB, tr(STR_LOGOUT_LINE1));
     gfx_text(x + 40, y + 124, 22, C_SUB, tr(STR_LOGOUT_LINE2));
-    int hx = x + w - 40 - 2 * 32 - 80 - gfx_text_width(22, tr(STR_HINT_SIGN_OUT)) -
-             gfx_text_width(22, tr(STR_HINT_CANCEL));
-    hx += draw_hint(hx, y + h - 64, "A", tr(STR_HINT_SIGN_OUT));
-    draw_hint(hx, y + h - 64, "B", tr(STR_HINT_CANCEL));
+    Hint hints[] = {{"A", tr(STR_HINT_SIGN_OUT)}, {"B", tr(STR_HINT_CANCEL)}};
+    draw_hints(x + w - 40, y + h - BTN_H - 20, hints, 2);
 }
 
 // ------------------------------------------------------------------ rendu
 
 static void draw_screen(void)
 {
+    s_touch.nzones = 0;
+    s_touch.scroll = NULL;
     gfx_clear(C_BG);
     switch (s_app.screen) {
     case SCR_LOGIN: draw_login(); break;
@@ -850,6 +983,109 @@ static void handle_input(u64 down)
     }
 }
 
+// Appui simple (doigt levé sans glisser) : action de la zone touchée la plus au-dessus
+static void touch_tap(int x, int y)
+{
+    for (int i = s_touch.nzones - 1; i >= 0; i--) {
+        HitZone z = s_touch.zones[i];  // copie : handle_input peut redessiner l'écran
+        if (!in_rect(x, y, z.x, z.y, z.w, z.h))
+            continue;
+        switch (z.kind) {
+        case HIT_BUTTON:
+            if (z.button)
+                handle_input(z.button);
+            break;
+        case HIT_GAME:
+            s_app.sel_game = z.row;
+            s_app.follow_sel = true;
+            handle_input(HidNpadButton_A);
+            break;
+        case HIT_ITEM:
+            // Premier appui : sélectionne ; appui sur la ligne déjà choisie : action proposée
+            if (z.row == s_app.sel_item)
+                handle_input(HidNpadButton_A);
+            s_app.sel_item = z.row;
+            s_app.follow_sel = true;
+            break;
+        }
+        s_app.dirty = true;
+        return;
+    }
+}
+
+static void scroll_by(float delta)
+{
+    if (!s_touch.scroll)
+        return;
+    int old = *s_touch.scroll;
+    int v = old + (int)delta;
+    if (v < 0)
+        v = 0;
+    if (v > s_touch.scroll_max)
+        v = s_touch.scroll_max;
+    if (v != old + (int)delta)
+        s_touch.velocity = 0;  // butée : le lancer s'arrête
+    if (v != old) {
+        *s_touch.scroll = v;
+        s_app.dirty = true;
+    }
+}
+
+// Écran tactile : appui simple au lâcher, glissement vertical pour faire défiler la liste,
+// qui continue sur sa lancée après un lancer.
+static void handle_touch(void)
+{
+    HidTouchScreenState st = {0};
+    bool down = hidGetTouchScreenStates(&st, 1) && st.count > 0;
+    int x = down ? (int)st.touches[0].x : s_touch.x;
+    int y = down ? (int)st.touches[0].y : s_touch.y;
+
+    if (down && !s_touch.down) {
+        s_touch.down = true;
+        // Un appui qui arrête un défilement en cours n'active rien
+        s_touch.can_tap = s_touch.velocity == 0;
+        s_touch.dragging = false;
+        s_touch.velocity = 0;
+        s_touch.x0 = s_touch.x = x;
+        s_touch.y0 = s_touch.y = y;
+        s_app.dirty = true;  // bouton enfoncé
+    } else if (down) {
+        int dy = y - s_touch.y;
+        if (!s_touch.dragging && (abs(x - s_touch.x0) > TAP_SLOP || abs(y - s_touch.y0) > TAP_SLOP)) {
+            s_touch.can_tap = false;
+            s_touch.dragging = s_touch.scroll &&
+                               in_rect(s_touch.x0, s_touch.y0, 0, s_touch.list_y, SCREEN_W, s_touch.list_h);
+            if (s_touch.dragging)
+                s_app.follow_sel = false;  // la sélection peut sortir de l'écran
+            s_app.dirty = true;
+        }
+        if (s_touch.dragging) {
+            scroll_by(-dy);
+            // Vitesse lissée sur les dernières images, pour le lancer
+            s_touch.velocity = 0.5f * s_touch.velocity + 0.5f * -dy;
+        }
+        s_touch.x = x;
+        s_touch.y = y;
+    } else if (s_touch.down) {
+        s_touch.down = false;
+        s_app.dirty = true;
+        if (s_touch.can_tap)
+            touch_tap(s_touch.x0, s_touch.y0);
+        if (!s_touch.dragging || (s_touch.velocity < FLICK_MIN && s_touch.velocity > -FLICK_MIN))
+            s_touch.velocity = 0;
+        if (s_touch.velocity > FLICK_MAX)
+            s_touch.velocity = FLICK_MAX;
+        if (s_touch.velocity < -FLICK_MAX)
+            s_touch.velocity = -FLICK_MAX;
+        s_touch.dragging = false;
+    } else if (s_touch.velocity != 0) {
+        scroll_by(s_touch.velocity);
+        s_touch.velocity *= FLICK_FRICTION;
+        if (s_touch.velocity < FLICK_MIN && s_touch.velocity > -FLICK_MIN)
+            s_touch.velocity = 0;
+    }
+}
+
 // ------------------------------------------------------------------ boucle
 
 bool ui_init(void)
@@ -861,6 +1097,8 @@ bool ui_init(void)
         return false;
     padConfigureInput(1, HidNpadStyleSet_NpadStandard);
     padInitializeDefault(&s_app.pad);
+    hidInitializeTouchScreen();
+    s_app.follow_sel = true;
 
     // Profil présélectionné au lancement, sinon le premier de la console
     if (R_FAILED(accountGetPreselectedUser(&s_app.uid))) {
@@ -905,9 +1143,13 @@ void ui_run(void)
         padUpdate(&s_app.pad);
         u64 down = padGetButtonsDown(&s_app.pad);
         if (down) {
+            // La manette reprend la main : plus de lancer, la liste suit la sélection
+            s_touch.velocity = 0;
+            s_app.follow_sel = true;
             handle_input(down);
             s_app.dirty = true;
         }
+        handle_touch();
         if (s_app.screen == SCR_LOGIN && s_app.dialog == DLG_NONE)
             poll_qr_login();
         if (s_app.dirty)
