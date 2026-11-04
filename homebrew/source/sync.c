@@ -9,6 +9,7 @@
 
 #include "fsutil.h"
 #include "log.h"
+#include "ori_convert.h"
 #include "sync.h"
 
 #define DATA_DIR "sdmc:/switch/savesync"
@@ -202,6 +203,15 @@ static void hk_side_info(SyncSide *side)
     }
 }
 
+// Détails de partie affichés (temps de jeu, progression), selon le jeu
+static void side_info(const GameProfile *profile, SyncSide *side)
+{
+    if (profile->converter == CONV_HOLLOW_KNIGHT)
+        hk_side_info(side);
+    else if (profile->converter == CONV_ORI && side->nfiles == 1)
+        side->has_info = ori_info(side->files[0].data, side->files[0].len, &side->info);
+}
+
 // Version à écrire dans une save destinée à la Switch : celle d'une save Switch existante,
 // sinon la version du jeu sans suffixe (le jeu s'annonce "1.4.3.2b" mais écrit "1.4.3.2").
 static void hk_target_version(const SyncPlan *plan, char *out, size_t len)
@@ -233,6 +243,8 @@ static bool convert_file(const SyncPlan *plan, const SyncFile *src, SyncDirectio
         if (!hk_is_pc(src->data, src->len))
             return hk_json_to_pc((const char *)src->data, src->len, out, len);
     }
+    if (plan->profile->converter == CONV_ORI)
+        return ori_convert(src->data, src->len, dir == APPLY_TO_SWITCH, out, len);
     *out = malloc(src->len ? src->len : 1);
     if (!*out)
         return false;
@@ -435,10 +447,8 @@ bool sync_build_plan(SteamCM *cm, const GameProfile *profile, const SaveEntry *s
             item->state_key[0] = '\0';
         finish_side(&item->sw, item->multi);
         finish_side(&item->st, item->multi);
-        if (profile->converter == CONV_HOLLOW_KNIGHT) {
-            hk_side_info(&item->sw);
-            hk_side_info(&item->st);
-        }
+        side_info(profile, &item->sw);
+        side_info(profile, &item->st);
         load_state(profile, item);
     }
     qsort(plan->items, plan->nitems, sizeof(SyncItem), compare_items);
@@ -501,7 +511,7 @@ static bool save_state(const GameProfile *profile, const char *key, const char *
     return ok;
 }
 
-static void append_history(const char *line)
+void sync_append_history(const char *line)
 {
     FILE *f = fopen(HISTORY_FILE, "a");
     if (!f)
@@ -515,7 +525,7 @@ static void append_history(const char *line)
 
 // Dossier de sauvegarde neuf : jamais partagé entre deux opérations, même dans la même seconde,
 // pour qu'une sauvegarde ne puisse pas en écraser une autre
-static void backup_dir(const GameProfile *profile, char *out, size_t len)
+void sync_backup_dir(const GameProfile *profile, char *out, size_t len)
 {
     char stamp[32];
     time_t now = time(NULL);
@@ -613,9 +623,24 @@ static bool apply_to_switch(SyncPlan *plan, SyncItem *item, SyncSide *data, cons
     finish_side(&check, item->multi);
     free_side(&item->sw);
     item->sw = check;
-    if (plan->profile->converter == CONV_HOLLOW_KNIGHT)
-        hk_side_info(&item->sw);
+    side_info(plan->profile, &item->sw);
     return true;
+}
+
+// Les noms des fichiers sauvegardés sont modifiés ('%' et ':' interdits sur la carte SD) :
+// le nom cloud exact de chacun est noté dans steam/names.txt, pour pouvoir le restaurer
+static bool backup_add_name(const char *backup, const char *file, const ProfileMap *map, const PatternMatch *match,
+                            const char *rel)
+{
+    char cloud[FS_MAX_PATH], path[160];
+    if (!pattern_expand(map->steam, match, rel, cloud, sizeof(cloud)))
+        return false;
+    snprintf(path, sizeof(path), "%s/steam/" BACKUP_NAMES, backup);
+    FILE *f = fopen(path, "a");
+    if (!f)
+        return false;
+    fprintf(f, "%s\t%s\n", file, cloud);
+    return fclose(f) == 0;
 }
 
 static bool apply_to_steam(SteamCM *cm, SyncPlan *plan, SyncItem *item, SyncSide *data, const char *backup)
@@ -632,7 +657,8 @@ static bool apply_to_steam(SteamCM *cm, SyncPlan *plan, SyncItem *item, SyncSide
                 *p = '_';
         int n = snprintf(dst, sizeof(dst), "%s/steam/", backup);
         fsutil_copy_str(dst + n, sizeof(dst) - n, name);
-        if (!fsutil_write_verified(dst, item->st.files[i].data, item->st.files[i].len)) {
+        if (!fsutil_write_verified(dst, item->st.files[i].data, item->st.files[i].len) ||
+            !backup_add_name(backup, dst + n, item->st.files[i].map, &item->match, item->st.files[i].rel)) {
             log_printf("Sauvegarde du fichier Steam impossible : rien n'est envoye.\n");
             return false;
         }
@@ -690,8 +716,7 @@ static bool apply_to_steam(SteamCM *cm, SyncPlan *plan, SyncItem *item, SyncSide
     item->st = *data;
     memset(data, 0, sizeof(*data));
     finish_side(&item->st, item->multi);
-    if (plan->profile->converter == CONV_HOLLOW_KNIGHT)
-        hk_side_info(&item->st);
+    side_info(plan->profile, &item->st);
     return true;
 }
 
@@ -711,7 +736,7 @@ bool sync_apply(SteamCM *cm, SyncPlan *plan, int index, SyncDirection dir)
     }
 
     char backup[128];
-    backup_dir(plan->profile, backup, sizeof(backup));
+    sync_backup_dir(plan->profile, backup, sizeof(backup));
     bool ok = dir == APPLY_TO_SWITCH ? apply_to_switch(plan, item, &data, backup)
                                      : apply_to_steam(cm, plan, item, &data, backup);
     free_side(&data);
@@ -730,6 +755,6 @@ bool sync_apply(SteamCM *cm, SyncPlan *plan, int index, SyncDirection dir)
     char line[512];
     snprintf(line, sizeof(line), "%s / %s : %s (backup: %s)", plan->profile->name, item->label,
              dir == APPLY_TO_SWITCH ? "Steam -> Switch" : "Switch -> Steam", backup);
-    append_history(line);
+    sync_append_history(line);
     return true;
 }

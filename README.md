@@ -15,15 +15,19 @@ converts it on the fly.
 
 - **QR code sign-in** with the Steam mobile app: your password is never typed on the Switch.
 - **Two-way sync**: Steam → Switch and Switch → Steam, slot by slot.
-- **Format conversion** when needed (e.g. Hollow Knight: encrypted on PC, plain JSON on Switch).
+- **Format conversion** when needed (e.g. Hollow Knight: encrypted on PC, plain JSON on Switch;
+  Ori and the Blind Forest: object IDs renamed by the Switch port).
 - **Change detection**: SaveSync remembers the state of each save at the last sync, so it knows
   which side changed. If both changed, it's a conflict and **you** choose which version to keep.
 - **Backups before every write**, on the SD card: the whole Switch save before writing to it,
-  the current cloud file before replacing it on Steam.
+  the current cloud file before replacing it on Steam. **Any backup can be restored** from the
+  app (**−** on a game), and a restore is itself backed up first, so it can be undone too.
+- **Warns before replacing a save that looks more advanced** than the one being copied.
 - **Never deletes anything on Steam**: it only replaces the save files it syncs; the game's own
   backup files (`.bak`, per-version copies…) are left untouched.
 - **Fast start**: games are only checked when you open them.
-- **Safe by design**: a game that is not on your Steam account cannot be synced.
+- **Safe by design**: a game that is not on your Steam account (bought, free or shared through
+  Steam Families) cannot be synced.
 - English and French interface (follows the console language, switchable with **Y**).
 
 ## Supported games
@@ -35,6 +39,7 @@ Game profiles live in [`homebrew/romfs/games.ini`](homebrew/romfs/games.ini).
 | Hollow Knight | ✅ verified | PC (AES-encrypted) ↔ Switch (plain JSON) |
 | Nine Sols | ✅ verified | none (same format) |
 | Hades II | ✅ verified | none (multi-file slots) |
+| Ori and the Blind Forest: Definitive Edition | 🟡 unverified | object IDs renamed (`converter = ori`), both directions loaded in game |
 | Hollow Knight: Silksong | 🟡 unverified | same as Hollow Knight |
 | Hades | 🟡 unverified | none (multi-file slots) |
 | Absolum, Dispatch, Monument Valley 2 | 🟡 unverified | none |
@@ -53,7 +58,8 @@ open an issue to report whether it works, so it can be marked as verified.
    python tools/steamcloud.py login        # once
    python tools/cloudconfig.py <appid>
    ```
-2. Find where the game stores its save inside the Switch save data (JKSV backups are handy).
+2. Find where the game stores its save inside the Switch save data: JKSV backups are handy, or
+   build `tools/savedump` (edit its title list) to copy the saves of several games to the SD card.
 3. Add a section to `games.ini`:
    ```ini
    [Stardew Valley]
@@ -125,7 +131,7 @@ make
 | Folder | Content |
 |---|---|
 | `homebrew/` | The Switch app (C, libnx) |
-| `tools/` | PC tools: Python prototype of the Steam Cloud client (`steamcloud.py`), Steam Cloud config lookup for any game (`cloudconfig.py`), Hollow Knight converter (`hk_convert.py`), icon generator, dev helpers to drive the console remotely with sys-botbase (`botbase.py`, `devrun.py`, need `SWITCH_IP`) |
+| `tools/` | PC tools: Python prototype of the Steam Cloud client (`steamcloud.py`), Steam Cloud config lookup for any game (`cloudconfig.py`), Hollow Knight converter (`hk_convert.py`), `savedump/` (homebrew that copies the Switch saves of a list of games to the SD card), icon generator, dev helpers to drive the console remotely with sys-botbase (`botbase.py`, `devrun.py`, need `SWITCH_IP`) |
 
 ## Credits
 

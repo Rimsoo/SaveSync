@@ -8,6 +8,7 @@
 typedef enum {
     CONV_NONE,            // même format des deux côtés : copie directe
     CONV_HOLLOW_KNIGHT,   // PC chiffré <-> Switch JSON en clair
+    CONV_ORI,             // Ori DE : GUID d'objets renommés, fichier Switch de taille fixe
 } Converter;
 
 #define PROFILE_PATH_LEN 256

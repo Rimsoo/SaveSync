@@ -23,3 +23,8 @@ homebrew/*.lst
 # Divers
 *.log
 .claude/
+tools/savedump/build/
+tools/savedump/*.nro
+tools/savedump/*.elf
+tools/savedump/*.nacp
+tools/savedump/*.map

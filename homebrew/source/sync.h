@@ -77,3 +77,12 @@ typedef enum { APPLY_TO_SWITCH, APPLY_TO_STEAM } SyncDirection;
 // 3. relecture de vérification, puis mémorisation de l'état et historique
 // Rien n'est jamais supprimé de Steam Cloud.
 bool sync_apply(SteamCM *cm, SyncPlan *plan, int index, SyncDirection dir);
+
+// Fichier de la sauvegarde Steam qui associe chaque fichier sauvegardé à son nom cloud exact
+#define BACKUP_NAMES "names.txt"
+
+// Crée un dossier de sauvegarde neuf pour ce jeu (jamais partagé entre deux opérations)
+void sync_backup_dir(const GameProfile *profile, char *out, size_t len);
+
+// Ajoute une ligne datée à l'historique des synchros
+void sync_append_history(const char *line);

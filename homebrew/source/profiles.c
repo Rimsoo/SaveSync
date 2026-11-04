@@ -116,7 +116,9 @@ static void load_file(const char *path)
         } else if (strcmp(key, "steam") == 0) {
             cur.appid = strtoul(value, NULL, 10);
         } else if (strcmp(key, "converter") == 0) {
-            cur.converter = strcmp(value, "hollow_knight") == 0 ? CONV_HOLLOW_KNIGHT : CONV_NONE;
+            cur.converter = strcmp(value, "hollow_knight") == 0 ? CONV_HOLLOW_KNIGHT
+                            : strcmp(value, "ori") == 0         ? CONV_ORI
+                                                                : CONV_NONE;
         } else if (strcmp(key, "combine") == 0) {
             cur.combine = strcmp(value, "yes") == 0;
         } else if (strcmp(key, "status") == 0) {

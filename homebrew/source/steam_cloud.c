@@ -18,7 +18,8 @@
 #define F_FILE_SIZE 5
 #define F_FILE_SHA 10
 
-int cloud_owns_app(SteamCM *cm, uint32_t appid)
+// Jeux achetés ou gratuits du compte (Player.GetOwnedGames ne voit pas la famille)
+static int owned_directly(SteamCM *cm, uint32_t appid)
 {
     PbBuf req = {0};
     pb_varint(&req, 1, cm->steamid);   // steamid
@@ -26,7 +27,6 @@ int cloud_owns_app(SteamCM *cm, uint32_t appid)
     pb_varint(&req, 4, appid);         // appids_filter
     pb_varint(&req, 5, 1);             // include_free_sub
     pb_varint(&req, 6, 0);             // skip_unvetted_apps
-    pb_varint(&req, 9, 1);             // include_family_licenses
 
     uint8_t *resp;
     size_t resp_len;
@@ -46,6 +46,59 @@ int cloud_owns_app(SteamCM *cm, uint32_t appid)
     }
     free(resp);
     return owned;
+}
+
+// Jeux prêtés par la famille Steam (hors jeux exclus du partage)
+static int owned_by_family(SteamCM *cm, uint32_t appid)
+{
+    PbBuf req = {0};
+    pb_fixed64(&req, 1, cm->steamid);  // steamid
+    uint8_t *resp;
+    size_t resp_len;
+    int eresult = cm_call(cm, "FamilyGroups.GetFamilyGroupForUser#1", &req, &resp, &resp_len);
+    pb_free(&req);
+    if (eresult != 1)
+        return -1;
+    uint64_t groupid = 0;
+    pb_get_u64(resp, resp_len, 1, &groupid);  // family_groupid
+    free(resp);
+    if (!groupid)
+        return 0;  // pas de famille
+
+    req = (PbBuf){0};
+    pb_fixed64(&req, 1, groupid);      // family_groupid
+    pb_varint(&req, 2, 1);             // include_own
+    pb_varint(&req, 3, 0);             // include_excluded
+    pb_fixed64(&req, 8, cm->steamid);  // steamid
+    eresult = cm_call(cm, "FamilyGroups.GetSharedLibraryApps#1", &req, &resp, &resp_len);
+    pb_free(&req);
+    if (eresult != 1)
+        return -1;
+
+    int owned = 0;
+    PbReader r;
+    PbField f;
+    pb_reader(&r, resp, resp_len);
+    while (pb_next(&r, &f) && !owned) {
+        uint64_t app = 0;
+        if (f.field == 1 && f.wire == PB_BYTES && pb_get_u64(f.data, f.len, 1, &app))
+            owned = app == appid;
+    }
+    free(resp);
+    return owned;
+}
+
+int cloud_owns_app(SteamCM *cm, uint32_t appid)
+{
+    int owned = owned_directly(cm, appid);
+    if (owned == 1)
+        return 1;
+    int family = owned_by_family(cm, appid);
+    if (family == 1)
+        log_printf("appid %u : bibliotheque familiale\n", appid);
+    if (family < 0)
+        return -1;  // famille illisible : on ne peut pas conclure
+    return family;
 }
 
 int cloud_enumerate(SteamCM *cm, uint32_t appid, CloudFile *files, int max)

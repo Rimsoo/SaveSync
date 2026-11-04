@@ -12,6 +12,20 @@
 | Monument Valley 2 | `010078C021280000` | 1927740 | 🟡 unverified | `PLAYER_PROGRESS.json` on Switch; PC path contains `{64BitSteamID}` |
 | Hades II | `0100A00019DE0000` | 1145350 | ✅ verified | `ProfileN.sav` + `.v.sav` + `_Temp.sav` synced together (`combine = yes`); Supergiant's format (`SGB1` header) |
 | Hades | `0100535012974000` | 1145360 | 🟡 unverified | Same layout as Hades II (verified) |
+| Ori and the Blind Forest: Definitive Edition | `010061D00DB74000` | 387290 | 🟡 unverified | See below |
+
+### Ori and the Blind Forest: Definitive Edition
+
+Both versions write the same `OriSave` format, but the Switch port gave new IDs to some of the
+game's objects (camera, game controller, world state, skill tree…). A save copied as-is shows
+up in the menu, then the game hangs while loading it. `converter = ori` renames those IDs using
+[`homebrew/romfs/ori_de_guids.txt`](../homebrew/romfs/ori_de_guids.txt) (197 pairs, built by
+matching the objects of the Steam build and of the Switch build v0 by class, name, position and
+parent) and pads the Switch file to its fixed 800000 bytes.
+
+Tested on a real console: a Switch save loads on PC and a 52 % PC save loads on Switch. Some
+physics props that could not be matched for sure (platforms on ropes, floating logs) may go back
+to their starting position. Please report anything odd later in the game.
 
 Tested one of the unverified games? Please open an issue with the result (which direction,
 did the game load the save?) so it can be marked as verified or fixed.
@@ -40,6 +54,18 @@ Switch save** (list the files of a JKSV backup) and whether the format is the sa
 | Blasphemous | `0100698009C6E000` | 774361 | `%WinAppDataLocalLow%TheGameKitchen/Blasphemous/Savegames/{64BitSteamID}/*` | Unknown |
 | Vampire Survivors | `010089A0197E4000` | 1794680 | several rules incl. `%WinAppDataRoaming%Vampire_Survivors_{Steam3AccountID}/*.sav` | Unknown |
 | DELTARUNE | `0100A0D022A68000` | 1671210 | `%WinAppDataLocal%DELTARUNE/*` | Unknown |
+| Outer Wilds | `01003DC0144B6000` | 753640 | `%WinAppDataLocalLow%Mobius Digital/Outer Wilds/SteamSaves/` (`<profile>.owprofile`, `<profile>/data.owsave`) | PC saves are JSON; unknown Switch layout |
+| GRIS | `0100E1700C31C000` | 683320 | `%WinAppDataLocalLow%nomada studio/GRIS/{64BitSteamID}/*` (`Save01/Progress.gs`, `Persistent.gs`) | Unknown Switch layout |
+| ibb & obb | `0100E09009600000` | 95400 | Steam API, bare names (`Player.sav`) | Unknown Switch layout |
+| Ori and the Will of the Wisps | `01008DD013200000` | 1057090 | `%WinAppDataLocal%Ori and the Will of The Wisps/*.uberstate` | Unknown Switch layout |
+| Little Nightmares (I, II, III) | `01002FC00412C000`, `010097100EDD6000`, `010066101A55A000` | 424840, 860510, 1392860 | Unreal `SaveGames/*.sav` | Unreal Engine: Switch names probably lack `.sav` (like Dispatch) |
+| Planet of Lana | `01003AD01D316000` | 1608230 | `%WinAppDataLocalLow%Wishfully/Planet of Lana/*.sav` | Unknown |
+| Until Then | `010019C023004000` | 1574820 | `%WinAppDataRoaming%Until Then/savegame.res` | Unknown |
+| Pankapu | `0100635006C32000` | 418670 | `%WinAppDataLocalLow%Too Kind Studio/Pankapu/savedGames.bin` | Unknown |
+| Nocturnal | `01009C2019510000` | 1634080 | `%WinAppDataLocalLow%Sunnyside Games/Nocturnal/{64BitSteamID}/*` | Unknown |
+| Doki Doki Literature Club Plus! | `010086901543E000` | 1388880 | `%WinAppDataLocalLow%Team Salvato/Doki Doki Literature Club Plus/*.sav` | Unknown |
+| Dungeon of the Endless | `010034300F0E2000` | 249050 | `%WinMyDocuments%Dungeon of the Endless/Users/{Steam3AccountID}/*.sav` | Unknown |
+| Hogwarts Legacy | `0100F7E00C70E000` | 990080 | `%WinAppDataLocal%Hogwarts Legacy/Saved/SaveGames/{Steam3AccountID}/*.sav` | Unreal Engine; Switch version may differ |
 
 About **Hades / Hades II**: the official cross-save only works with the online service,
 so it is not available on a console kept offline; their profiles use the file names that

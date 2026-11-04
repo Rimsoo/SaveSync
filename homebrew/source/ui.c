@@ -5,6 +5,7 @@
 
 #include <switch.h>
 
+#include "backups.h"
 #include "gfx.h"
 #include "i18n.h"
 #include "log.h"
@@ -54,8 +55,10 @@ typedef struct {
     GfxImage icon, icon_small;
 } Game;
 
-typedef enum { SCR_LOGIN, SCR_GAMES, SCR_GAME } Screen;
-typedef enum { DLG_NONE, DLG_CONFIRM_SYNC, DLG_CONFIRM_LOGOUT, DLG_MESSAGE } DialogKind;
+typedef enum { SCR_LOGIN, SCR_GAMES, SCR_GAME, SCR_BACKUPS } Screen;
+typedef enum { DLG_NONE, DLG_CONFIRM_SYNC, DLG_CONFIRM_RESTORE, DLG_CONFIRM_LOGOUT, DLG_MESSAGE } DialogKind;
+
+#define MAX_BACKUPS 64
 
 static struct {
     bool running;
@@ -75,6 +78,10 @@ static struct {
     int scroll_game, scroll_item;  // défilement de chaque liste, en pixels
     bool follow_sel;               // la liste défile pour garder la sélection visible
 
+    // Sauvegardes du jeu ouvert
+    BackupEntry backups[MAX_BACKUPS];
+    int nbackups, sel_backup, scroll_backup;
+
     // Connexion par QR
     SteamQrLogin qr;
     bool qr_ok;
@@ -92,13 +99,13 @@ static struct {
 
 // Zones touchables, enregistrées pendant le dessin : elles décrivent toujours l'image
 // affichée. Un appui sur un bouton simule la touche correspondante de la manette.
-typedef enum { HIT_BUTTON, HIT_GAME, HIT_ITEM } HitKind;
+typedef enum { HIT_BUTTON, HIT_GAME, HIT_ITEM, HIT_BACKUP } HitKind;
 
 typedef struct {
     int x, y, w, h;
     HitKind kind;
     u64 button;  // HIT_BUTTON : touche simulée (0 = zone qui absorbe l'appui)
-    int row;     // HIT_GAME, HIT_ITEM : ligne de la liste
+    int row;     // HIT_GAME, HIT_ITEM, HIT_BACKUP : ligne de la liste
 } HitZone;
 
 #define MAX_ZONES 32
@@ -180,7 +187,10 @@ static void format_side(const SyncSide *side, char *out, size_t len)
         for (char *p = hours; *p; p++)
             if (*p == '.')
                 *p = tr(STR_DECIMAL_SEP)[0];
-        snprintf(out, len, "%s h  ·  %ld geo  ·  %.0f %%", hours, side->info.geo, side->info.completion);
+        if (side->info.geo >= 0)
+            snprintf(out, len, "%s h  ·  %ld geo  ·  %.0f %%", hours, side->info.geo, side->info.completion);
+        else
+            snprintf(out, len, "%s h  ·  %.0f %%", hours, side->info.completion);
     } else {
         char size[32];
         snprintf(size, sizeof(size), tr(STR_SIZE_KB), (side->total_len + 1023) / 1024);
@@ -593,7 +603,7 @@ static void draw_game(void)
     if (g->analyzed && g->plan_ok && g->plan.nitems > 0) {
         const SyncItem *it = &g->plan.items[s_app.sel_item];
         gfx_text_fit(MARGIN, SCREEN_H - FOOTER_H - 40, 22, C_SUB, tr(it->reason), SCREEN_W - 2 * MARGIN);
-        Hint hints[5];
+        Hint hints[6];
         int n = 0;
         if (it->status == SYNC_TO_SWITCH)
             hints[n++] = (Hint){"A", tr(STR_HINT_COPY_TO_SWITCH)};
@@ -603,11 +613,85 @@ static void draw_game(void)
             hints[n++] = (Hint){"X", tr(STR_HINT_KEEP_SWITCH)};
         if (it->st.exists)
             hints[n++] = (Hint){"Y", tr(STR_HINT_KEEP_STEAM)};
+        hints[n++] = (Hint){"-", tr(STR_HINT_BACKUPS)};
         hints[n++] = (Hint){"B", tr(STR_HINT_BACK)};
         draw_footer(hints, n);
     } else {
-        Hint hints[] = {{"X", tr(STR_HINT_REFRESH)}, {"B", tr(STR_HINT_BACK)}};
+        Hint hints[] = {{"X", tr(STR_HINT_REFRESH)}, {"-", tr(STR_HINT_BACKUPS)}, {"B", tr(STR_HINT_BACK)}};
+        draw_footer(hints, 3);
+    }
+}
+
+// ------------------------------------------------------------------ sauvegardes
+
+// "20261104-111727" -> date lisible
+static void format_stamp(const char *stamp, char *out, size_t len)
+{
+    struct tm tm = {0};
+    if (sscanf(stamp, "%4d%2d%2d-%2d%2d%2d", &tm.tm_year, &tm.tm_mon, &tm.tm_mday, &tm.tm_hour, &tm.tm_min,
+               &tm.tm_sec) != 6) {
+        snprintf(out, len, "%s", stamp);
+        return;
+    }
+    if (i18n_language() == LANG_EN)
+        snprintf(out, len, "%s %d, %d, %02d:%02d:%02d", tr_month(tm.tm_mon - 1), tm.tm_mday, tm.tm_year,
+                 tm.tm_hour, tm.tm_min, tm.tm_sec);
+    else
+        snprintf(out, len, "%d %s %d, %02d:%02d:%02d", tm.tm_mday, tr_month(tm.tm_mon - 1), tm.tm_year,
+                 tm.tm_hour, tm.tm_min, tm.tm_sec);
+}
+
+static void draw_backups(void)
+{
+    Game *g = &s_app.games[s_app.sel_game];
+    draw_header(g->profile->name, tr(STR_BACKUPS_TITLE), &g->icon_small);
+    if (s_app.nbackups == 0)
+        gfx_text(MARGIN, HEADER_H + 40, 26, C_SUB, tr(STR_BACKUPS_NONE));
+
+    const int row_h = 96, stride = row_h + 12;
+    const int visible = (LIST_BOTTOM - LIST_TOP + 12) / stride;
+    const int view_h = list_begin(&s_app.scroll_backup, s_app.sel_backup, s_app.nbackups, stride, 12, visible);
+    for (int i = s_app.scroll_backup / stride; i < s_app.nbackups; i++) {
+        const BackupEntry *b = &s_app.backups[i];
+        int y = LIST_TOP + i * stride - s_app.scroll_backup;
+        if (y >= LIST_TOP + view_h + 8)
+            break;
+        hit_add_row(MARGIN, y, SCREEN_W - 2 * MARGIN, row_h, HIT_BACKUP, i);
+        bool sel = i == s_app.sel_backup;
+        if (sel)
+            gfx_round_rect(MARGIN - 4, y - 4, SCREEN_W - 2 * MARGIN + 8, row_h + 8, 18, C_BORDER);
+        gfx_round_rect(MARGIN, y, SCREEN_W - 2 * MARGIN, row_h, 14, sel ? C_PANEL_SEL : C_PANEL);
+
+        char date[64], line[240], files[64];
+        format_stamp(b->stamp, date, sizeof(date));
+        gfx_text(MARGIN + 24, y + 16, 26, C_TEXT, date);
+        bool sw = b->kind == BACKUP_SWITCH;
+        draw_badge(SCREEN_W - MARGIN - 24 - gfx_text_width(20, tr(sw ? STR_BACKUP_KIND_SWITCH : STR_BACKUP_KIND_STEAM)) - 24,
+                   y + 16, tr(sw ? STR_BACKUP_KIND_SWITCH : STR_BACKUP_KIND_STEAM), sw ? C_BLUE : C_GREEN);
+        char size[24];
+        snprintf(size, sizeof(size), tr(STR_SIZE_KB), (b->bytes + 1023) / 1024);
+        if (b->nfiles > 1)
+            snprintf(files, sizeof(files), tr(STR_FILES), b->nfiles, size);
+        else
+            snprintf(files, sizeof(files), "%s", size);
+        if (b->action[0]) {
+            char before[136];
+            snprintf(before, sizeof(before), tr(STR_BACKUP_BEFORE), b->action);
+            snprintf(line, sizeof(line), "%s  ·  %s", before, files);
+        } else {
+            snprintf(line, sizeof(line), "%s", files);
+        }
+        gfx_text_fit(MARGIN + 24, y + 56, 20, C_SUB, line, SCREEN_W - 2 * MARGIN - 48);
+    }
+    gfx_reset_clip();
+    draw_scrollbar(s_app.scroll_backup, visible * stride, s_app.nbackups * stride);
+
+    if (s_app.nbackups > 0) {
+        Hint hints[] = {{"A", tr(STR_HINT_RESTORE)}, {"B", tr(STR_HINT_BACK)}};
         draw_footer(hints, 2);
+    } else {
+        Hint hint = {"B", tr(STR_HINT_BACK)};
+        draw_footer(&hint, 1);
     }
 }
 
@@ -627,6 +711,17 @@ static void draw_dialog_box(int w, int h, int *x, int *y, u64 outside, u64 insid
     hit_add(*x, *y, w, h, HIT_BUTTON, inside, -1);
 }
 
+// La save qui va être remplacée semble-t-elle plus avancée que celle copiée ? Temps de jeu
+// quand on le connaît, sinon taille : une save qui grossit avec la progression est courante.
+static bool dest_looks_ahead(const SyncSide *src, const SyncSide *dst)
+{
+    if (!src->exists || !dst->exists)
+        return false;
+    if (src->has_info && dst->has_info)
+        return dst->info.play_hours > src->info.play_hours + 0.1;
+    return dst->total_len > src->total_len + src->total_len / 2;
+}
+
 static void draw_confirm_sync(void)
 {
     Game *g = &s_app.games[s_app.sel_game];
@@ -635,7 +730,8 @@ static void draw_confirm_sync(void)
     const SyncSide *src = to_steam ? &it->sw : &it->st;
     const SyncSide *dst = to_steam ? &it->st : &it->sw;
 
-    int x, y, w = 900, h = g->profile->verified ? 380 : 414;
+    bool ahead = dest_looks_ahead(src, dst);
+    int x, y, w = 900, h = (g->profile->verified ? 380 : 414) + (ahead ? 34 : 0);
     draw_dialog_box(w, h, &x, &y, HidNpadButton_B, 0);
     const char *title = tr(to_steam ? STR_CONFIRM_TO_STEAM : STR_CONFIRM_TO_SWITCH);
     gfx_text(x + 40, y + 32, 34, C_TEXT, title);
@@ -653,6 +749,10 @@ static void draw_confirm_sync(void)
     gfx_text(x + 300, y + 176, 22, dst->exists ? C_TEXT : C_DIM, b);
 
     int ty = y + 236;
+    if (ahead) {
+        gfx_text(x + 40, ty, 22, C_RED, tr(STR_WARN_DST_AHEAD));
+        ty += 34;
+    }
     if (!g->profile->verified) {
         gfx_text(x + 40, ty, 22, C_ORANGE, tr(STR_WARN_UNVERIFIED));
         ty += 34;
@@ -667,7 +767,25 @@ static void draw_confirm_sync(void)
     }
     gfx_text(x + 40, ty, 22, C_GREEN, tr(dst->exists ? STR_BACKUP_NOTE : STR_EMPTY_NOTE));
 
-    Hint hints[] = {{"A", tr(STR_HINT_CONFIRM)}, {"B", tr(STR_HINT_CANCEL)}};
+    Hint hints[] = {{"A", tr(ahead ? STR_HINT_REPLACE_ANYWAY : STR_HINT_CONFIRM)}, {"B", tr(STR_HINT_CANCEL)}};
+    draw_hints(x + w - 40, y + h - BTN_H - 20, hints, 2);
+}
+
+static void draw_confirm_restore(void)
+{
+    Game *g = &s_app.games[s_app.sel_game];
+    const BackupEntry *b = &s_app.backups[s_app.sel_backup];
+    bool sw = b->kind == BACKUP_SWITCH;
+    int x, y, w = 900, h = 330;
+    draw_dialog_box(w, h, &x, &y, HidNpadButton_B, 0);
+    gfx_text(x + 40, y + 32, 34, C_TEXT, tr(sw ? STR_RESTORE_TITLE_SWITCH : STR_RESTORE_TITLE_STEAM));
+    char date[64], line[160];
+    format_stamp(b->stamp, date, sizeof(date));
+    snprintf(line, sizeof(line), "%s  ·  %s", g->profile->name, date);
+    gfx_text(x + 40, y + 84, 24, C_SUB, line);
+    gfx_text_fit(x + 40, y + 140, 22, C_TEXT, tr(sw ? STR_RESTORE_LINE_SWITCH : STR_RESTORE_LINE_STEAM), w - 80);
+    gfx_text_fit(x + 40, y + 176, 22, C_GREEN, tr(STR_RESTORE_SAFETY), w - 80);
+    Hint hints[] = {{"A", tr(STR_HINT_RESTORE)}, {"B", tr(STR_HINT_CANCEL)}};
     draw_hints(x + w - 40, y + h - BTN_H - 20, hints, 2);
 }
 
@@ -709,9 +827,11 @@ static void draw_screen(void)
     case SCR_LOGIN: draw_login(); break;
     case SCR_GAMES: draw_games(); break;
     case SCR_GAME: draw_game(); break;
+    case SCR_BACKUPS: draw_backups(); break;
     }
     switch (s_app.dialog) {
     case DLG_CONFIRM_SYNC: draw_confirm_sync(); break;
+    case DLG_CONFIRM_RESTORE: draw_confirm_restore(); break;
     case DLG_CONFIRM_LOGOUT: draw_confirm_logout(); break;
     case DLG_MESSAGE: draw_message(); break;
     case DLG_NONE: break;
@@ -862,6 +982,42 @@ static void do_sync(void)
     }
 }
 
+static void open_backups(void)
+{
+    Game *g = &s_app.games[s_app.sel_game];
+    s_app.nbackups = backups_list(g->profile, s_app.backups, MAX_BACKUPS);
+    s_app.sel_backup = s_app.scroll_backup = 0;
+    s_app.screen = SCR_BACKUPS;
+}
+
+static void do_restore(void)
+{
+    Game *g = &s_app.games[s_app.sel_game];
+    const BackupEntry *b = &s_app.backups[s_app.sel_backup];
+    s_app.dialog = DLG_NONE;
+
+    bool ok;
+    if (b->kind == BACKUP_SWITCH) {
+        render_busy(tr(STR_BUSY_RESTORING));
+        ok = backups_restore_switch(g->profile, &g->save, b);
+    } else {
+        SteamCM cm;
+        if (!connect_steam(&cm))
+            return;
+        render_busy(tr(STR_BUSY_RESTORING));
+        ok = backups_restore_steam(&cm, g->profile, b);
+        cm_close(&cm);
+    }
+    // La restauration a créé une nouvelle sauvegarde (l'état d'avant) : la liste change
+    s_app.nbackups = backups_list(g->profile, s_app.backups, MAX_BACKUPS);
+    s_app.sel_backup = 0;
+    g->analyzed = false;  // à réanalyser au retour sur le jeu
+    if (ok)
+        show_message(tr(STR_MSG_RESTORED_TITLE), tr(STR_MSG_RESTORED_BODY), C_GREEN);
+    else
+        show_message(tr(STR_MSG_FAIL_TITLE), tr(STR_MSG_FAIL_BODY), C_RED);
+}
+
 static void start_qr_login(void)
 {
     render_busy(tr(STR_BUSY_QR));
@@ -908,6 +1064,8 @@ static void handle_input(u64 down)
     if (s_app.dialog != DLG_NONE) {
         if (s_app.dialog == DLG_CONFIRM_SYNC && (down & HidNpadButton_A))
             do_sync();
+        else if (s_app.dialog == DLG_CONFIRM_RESTORE && (down & HidNpadButton_A))
+            do_restore();
         else if (s_app.dialog == DLG_CONFIRM_LOGOUT && (down & HidNpadButton_A)) {
             session_delete();
             s_app.logged_in = false;
@@ -956,6 +1114,10 @@ static void handle_input(u64 down)
             s_app.screen = SCR_GAMES;
             break;
         }
+        if (down & HidNpadButton_Minus) {
+            open_backups();
+            break;
+        }
         if (!g->plan_ok || g->plan.nitems == 0) {
             if (down & HidNpadButton_X)
                 analyze_game(g);
@@ -978,6 +1140,23 @@ static void handle_input(u64 down)
             s_app.dialog_dir = APPLY_TO_SWITCH;
             s_app.dialog = DLG_CONFIRM_SYNC;
         }
+        break;
+    }
+
+    case SCR_BACKUPS: {
+        Game *g = &s_app.games[s_app.sel_game];
+        if (down & HidNpadButton_B) {
+            s_app.screen = SCR_GAME;
+            if (!g->analyzed)
+                analyze_game(g);
+            break;
+        }
+        if ((down & HidNpadButton_AnyDown) && s_app.sel_backup + 1 < s_app.nbackups)
+            s_app.sel_backup++;
+        if ((down & HidNpadButton_AnyUp) && s_app.sel_backup > 0)
+            s_app.sel_backup--;
+        if ((down & HidNpadButton_A) && s_app.nbackups > 0)
+            s_app.dialog = DLG_CONFIRM_RESTORE;
         break;
     }
     }
@@ -1005,6 +1184,12 @@ static void touch_tap(int x, int y)
             if (z.row == s_app.sel_item)
                 handle_input(HidNpadButton_A);
             s_app.sel_item = z.row;
+            s_app.follow_sel = true;
+            break;
+        case HIT_BACKUP:
+            if (z.row == s_app.sel_backup)
+                handle_input(HidNpadButton_A);
+            s_app.sel_backup = z.row;
             s_app.follow_sel = true;
             break;
         }
