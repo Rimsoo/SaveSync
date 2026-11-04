@@ -1,0 +1,4 @@
+requests
+qrcode
+websocket-client
+cryptography

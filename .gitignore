@@ -1,0 +1,25 @@
+# Données personnelles : ne jamais versionner
+tools/session.json
+tools/downloads/
+tools/backups/
+switch_saves/
+*.dat
+*.sav
+
+# Python
+.venv/
+__pycache__/
+
+# Compilation Switch
+homebrew/build/
+homebrew/*.nro
+homebrew/*.elf
+homebrew/*.nacp
+homebrew/*.nso
+homebrew/*.pfs0
+homebrew/*.map
+homebrew/*.lst
+
+# Divers
+*.log
+.claude/
