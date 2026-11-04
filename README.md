@@ -22,18 +22,42 @@ converts it on the fly.
   the current cloud file before replacing it on Steam.
 - **Never deletes anything on Steam**: it only replaces the save files it syncs; the game's own
   backup files (`.bak`, per-version copies…) are left untouched.
+- **Fast start**: games are only checked when you open them.
 - English and French interface (follows the console language, switchable with **Y**).
 
 ## Supported games
 
-| Game | Conversion | Synced files |
-|---|---|---|
-| Hollow Knight | PC (AES-encrypted) ↔ Switch (plain JSON) | `user1.dat` … `user4.dat` |
-| Nine Sols | none (same format) | `saveslot0` … `saveslot3/flags.sav` |
+Game profiles live in [`homebrew/romfs/games.ini`](homebrew/romfs/games.ini).
 
-Settings files are not synced. Adding a game means adding a profile in
-[`homebrew/source/profiles.c`](homebrew/source/profiles.c) (and a converter if the formats
-differ). Contributions welcome!
+| Game | Status | Conversion | Synced saves |
+|---|---|---|---|
+| Hollow Knight | ✅ verified | PC (AES-encrypted) ↔ Switch (plain JSON) | `user1.dat` … `user4.dat` |
+| Nine Sols | ✅ verified | none (same format) | `saveslot0` … `saveslot3/flags.sav` |
+
+**Unverified** profiles are shown with an orange badge and an extra warning before any write:
+they are based on research but nobody has tested them for real yet. If you try one, please
+open an issue to report whether it works, so it can be marked as verified.
+
+### Adding a game
+
+1. Get the Steam Cloud file names of the game, even if you don't own it:
+   ```bash
+   python tools/steamcloud.py login        # once
+   python tools/cloudconfig.py <appid>
+   ```
+2. Find where the game stores its save inside the Switch save data (JKSV backups are handy).
+3. Add a section to `games.ini`:
+   ```ini
+   [Stardew Valley]
+   switch = 0100E65002BB8000
+   steam = 413150
+   status = unverified
+   map = %WinAppDataRoaming%StardewValley/Saves/*/** => */**
+   ```
+   In patterns, `#` matches a slot number, `*` a name, and a final `**` a whole folder synced
+   as one save. You can test a profile without rebuilding by putting it in
+   `sdmc:/switch/savesync/games.ini` on the SD card (it overrides the built-in list).
+4. Only map real save slots — never settings files or the backup copies the PC game makes.
 
 ## Install
 
@@ -53,6 +77,7 @@ differ). Contributions welcome!
 | `sdmc:/switch/savesync/state/` | Fingerprints of the last sync, per game |
 | `sdmc:/switch/savesync/history.txt` | Log of the sync operations |
 | `sdmc:/switch/savesync/config.txt` | Settings (language) |
+| `sdmc:/switch/savesync/games.ini` | Optional extra / overriding game profiles |
 
 ## Controls
 
@@ -91,7 +116,7 @@ make
 | Folder | Content |
 |---|---|
 | `homebrew/` | The Switch app (C, libnx) |
-| `tools/` | PC tools: Python prototype of the Steam Cloud client (`steamcloud.py`), Hollow Knight converter (`hk_convert.py`), dev helpers to drive the console remotely with sys-botbase (`botbase.py`, `devrun.py`, need `SWITCH_IP`) |
+| `tools/` | PC tools: Python prototype of the Steam Cloud client (`steamcloud.py`), Steam Cloud config lookup for any game (`cloudconfig.py`), Hollow Knight converter (`hk_convert.py`), icon generator, dev helpers to drive the console remotely with sys-botbase (`botbase.py`, `devrun.py`, need `SWITCH_IP`) |
 
 ## Credits
 

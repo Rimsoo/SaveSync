@@ -2,6 +2,7 @@
 
 #include "hk_convert.h"
 #include "i18n.h"
+#include "pattern.h"
 #include "profiles.h"
 #include "saves.h"
 #include "steam_cloud.h"
@@ -13,25 +14,43 @@ typedef enum {
     SYNC_CONFLICT,     // les deux ont changé, ou première synchro avec deux versions différentes
 } SyncStatus;
 
-// État d'un côté (Switch ou Steam) pour un fichier
+// Un fichier d'une save. `rel` : chemin dans le groupe (vide pour une save d'un seul fichier).
 typedef struct {
-    bool exists;
-    uint8_t *data;
+    char rel[160];
+    uint8_t *data;    // terminé par un '\0' supplémentaire (lecture du JSON en place)
     size_t len;
     char sha[41];
-    uint64_t mtime;        // date de modification (Unix), 0 si inconnue
+    uint64_t mtime;
+} SyncFile;
+
+#define SYNC_MAX_FILES 24
+
+// État d'un côté (Switch ou Steam) pour une save
+typedef struct {
+    bool exists;
+    int nfiles;
+    SyncFile files[SYNC_MAX_FILES];
+    size_t total_len;
+    char sha[41];          // empreinte de la save (du fichier seul, ou de tout le groupe)
+    uint64_t mtime;        // date de modification la plus récente, 0 si inconnue
     bool has_info;
     HkInfo info;           // détails de la partie (Hollow Knight uniquement)
 } SyncSide;
 
 typedef struct {
-    const FileMap *map;
+    const ProfileMap *map;
+    PatternMatch match;          // jokers communs aux deux côtés
+    char state_key[PROFILE_PATH_LEN];
+    char label[64];              // "3" pour un emplacement numéroté, sinon un nom
+    bool numbered;
     SyncSide sw, st;
-    bool has_state;               // déjà synchronisé une fois
+    bool has_state;              // déjà synchronisé une fois
     char last_sw[41], last_st[41];
     SyncStatus status;
-    StrId reason;                 // explication du statut (texte traduit)
+    StrId reason;                // explication du statut (texte traduit)
 } SyncItem;
+
+#define SYNC_MAX_ITEMS 16
 
 typedef struct {
     const GameProfile *profile;
@@ -40,7 +59,7 @@ typedef struct {
     char target_version[32];      // version à écrire dans une save convertie pour la Switch
     StrId error;                  // STR_ERR_NONE si le plan est complet
     int nitems;
-    SyncItem items[PROFILE_MAX_FILES];
+    SyncItem items[SYNC_MAX_ITEMS];
 } SyncPlan;
 
 // Compare la save Switch et Steam Cloud pour un jeu. Lecture seule des deux côtés.
@@ -51,7 +70,8 @@ typedef enum { APPLY_TO_SWITCH, APPLY_TO_STEAM } SyncDirection;
 
 // Applique un élément du plan dans le sens choisi. Toujours dans cet ordre :
 // 1. sauvegarde sur la carte SD de ce qui va être remplacé (toute la save Switch,
-//    ou le fichier Steam actuel) ; échec de sauvegarde = on n'écrit rien
+//    ou les fichiers Steam actuels) ; échec de sauvegarde = on n'écrit rien
 // 2. écriture (save Switch validée par commit, ou envoi Steam dans un lot)
 // 3. relecture de vérification, puis mémorisation de l'état et historique
+// Rien n'est jamais supprimé de Steam Cloud.
 bool sync_apply(SteamCM *cm, SyncPlan *plan, int index, SyncDirection dir);

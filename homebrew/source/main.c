@@ -10,6 +10,7 @@
 int main(int argc, char *argv[])
 {
     log_init();
+    romfsInit();  // games.ini fourni avec l'appli
     net_init();
     tls_init();
     accountInitialize(AccountServiceType_System);
@@ -26,6 +27,7 @@ int main(int argc, char *argv[])
     accountExit();
     tls_exit();
     net_exit();
+    romfsExit();
     log_exit();
     return 0;
 }

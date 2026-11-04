@@ -45,7 +45,7 @@ BUILD		:=	build
 SOURCES		:=	source source/third_party/qrcodegen
 DATA		:=	data
 INCLUDES	:=	include
-#ROMFS	:=	romfs
+ROMFS	:=	romfs
 
 #---------------------------------------------------------------------------------
 # options for code generation

@@ -36,6 +36,9 @@ typedef enum {
     STR_DATE_NOT_RECORDED,
     STR_NO_SAVE,
     STR_SIZE_KB,         // %zu
+    STR_FILES,           // %d %s
+    STR_UNVERIFIED,
+    STR_WARN_UNVERIFIED,
     STR_SLOT,            // %d
     STR_WHO_LOGGED_IN,   // %s %s
     STR_WHO_SWITCH,      // %s
@@ -56,6 +59,7 @@ typedef enum {
     STR_CONFLICTS_MANY,  // %d
     STR_PENDING,         // %d
     STR_NO_SAVE_ANYWHERE,
+    STR_NOT_CHECKED,
 
     // Boutons
     STR_HINT_NEW_CODE,

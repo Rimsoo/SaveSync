@@ -26,22 +26,18 @@ TEXT = (236, 238, 241)
 
 def arc_arrow(draw, cx, cy, r, start, end, width, color):
     """Arc de cercle de `start` à `end` (degrés, sens horaire) terminé par une pointe."""
-    box = [cx - r, cy - r, cx + r, cy + r]
-    draw.arc(box, start, end, fill=color, width=width)
-    # Pointe : triangle tangent au cercle, au bout de l'arc
+    draw.arc([cx - r, cy - r, cx + r, cy + r], start, end, fill=color, width=width)
+    # Pillow dessine l'épaisseur vers l'intérieur : l'axe de l'arc est à r - width/2
+    rc = r - width / 2
     a = math.radians(end)
-    tip_x, tip_y = cx + r * math.cos(a), cy + r * math.sin(a)
-    tangent = a + math.pi / 2  # direction du mouvement (sens horaire en coordonnées écran)
-    head = width * 1.25
-    back_x = tip_x - head * 0.9 * math.cos(tangent)
-    back_y = tip_y - head * 0.9 * math.sin(tangent)
-    tip2_x = tip_x + head * 0.9 * math.cos(tangent)
-    tip2_y = tip_y + head * 0.9 * math.sin(tangent)
-    nx, ny = math.cos(a), math.sin(a)  # normale (vers l'extérieur)
+    px, py = cx + rc * math.cos(a), cy + rc * math.sin(a)  # bout de l'arc, sur son axe
+    tx, ty = -math.sin(a), math.cos(a)                      # sens du mouvement (horaire)
+    nx, ny = math.cos(a), math.sin(a)                       # normale, vers l'extérieur
+    half, length = width * 1.15, width * 1.5
     draw.polygon([
-        (tip2_x, tip2_y),
-        (back_x + nx * head, back_y + ny * head),
-        (back_x - nx * head, back_y - ny * head),
+        (px + nx * half, py + ny * half),
+        (px - nx * half, py - ny * half),
+        (px + tx * length, py + ty * length),
     ], fill=color)
 
 
@@ -58,8 +54,8 @@ def main():
         draw.line([(0, y), (s, y)], fill=tuple(int(a + (b - a) * t) for a, b in zip(BG_TOP, BG_BOTTOM)))
 
     cx, cy, r, w = s // 2, int(s * 0.43), int(s * 0.27), int(s * 0.075)
-    arc_arrow(draw, cx, cy, r, 208, 318, w, RED)    # haut : vers la droite
-    arc_arrow(draw, cx, cy, r, 28, 138, w, BLUE)     # bas : vers la gauche
+    arc_arrow(draw, cx, cy, r, 200, 320, w, RED)    # haut : vers la droite
+    arc_arrow(draw, cx, cy, r, 20, 140, w, BLUE)     # bas : vers la gauche
 
     font = ImageFont.truetype(args.font, int(s * 0.135))
     label = "SaveSync"

@@ -46,6 +46,7 @@ typedef struct {
     const GameProfile *profile;
     SaveEntry save;
     SyncPlan plan;
+    bool analyzed;  // analysé à l'ouverture du jeu, pas au lancement de l'appli
     bool plan_ok;
     GfxImage icon, icon_small;
 } Game;
@@ -114,7 +115,12 @@ static void format_side(const SyncSide *side, char *out, size_t len)
                 *p = tr(STR_DECIMAL_SEP)[0];
         snprintf(out, len, "%s h  ·  %ld geo  ·  %.0f %%", hours, side->info.geo, side->info.completion);
     } else {
-        snprintf(out, len, tr(STR_SIZE_KB), (side->len + 1023) / 1024);
+        char size[32];
+        snprintf(size, sizeof(size), tr(STR_SIZE_KB), (side->total_len + 1023) / 1024);
+        if (side->nfiles > 1)
+            snprintf(out, len, tr(STR_FILES), side->nfiles, size);
+        else
+            snprintf(out, len, "%s", size);
     }
 }
 
@@ -136,6 +142,14 @@ static const char *status_text(SyncStatus s)
     case SYNC_CONFLICT: return tr(STR_STATUS_CONFLICT);
     }
     return "";
+}
+
+static void item_label(const SyncItem *it, char *out, size_t len)
+{
+    if (it->numbered)
+        snprintf(out, len, tr(STR_SLOT), atoi(it->label));
+    else
+        snprintf(out, len, "%s", it->label);
 }
 
 // ------------------------------------------------------------------ éléments graphiques
@@ -238,6 +252,11 @@ static void draw_login(void)
 
 static void game_summary(const Game *g, char *out, size_t len, Color *color)
 {
+    if (!g->analyzed) {
+        snprintf(out, len, "%s", tr(STR_NOT_CHECKED));
+        *color = C_SUB;
+        return;
+    }
     if (!g->plan_ok) {
         snprintf(out, len, "%s", tr(g->plan.error != STR_ERR_NONE ? g->plan.error : STR_ERR_ANALYSIS));
         *color = C_RED;
@@ -293,10 +312,13 @@ static void draw_games(void)
         int tx = MARGIN + 18 + ICON_BIG + 24;
         gfx_text(tx, y + 24, 30, C_TEXT, g->profile->name);
 
-        char slots[48], sub[128];
+        char version[16] = "?", slots[48], sub[128];
+        saves_game_version(g->profile->title_id, version, sizeof(version));
         snprintf(slots, sizeof(slots), tr(g->plan.nitems > 1 ? STR_SLOTS_MANY : STR_SLOTS_ONE), g->plan.nitems);
-        snprintf(sub, sizeof(sub), "%s  ·  Switch v%s  ·  Steam %u", slots, g->plan.switch_version,
-                 g->profile->appid);
+        if (g->analyzed && g->plan_ok)
+            snprintf(sub, sizeof(sub), "%s  ·  Switch v%s  ·  Steam %u", slots, version, g->profile->appid);
+        else
+            snprintf(sub, sizeof(sub), "Switch v%s  ·  Steam %u", version, g->profile->appid);
         gfx_text(tx, y + 72, 20, C_SUB, sub);
 
         char summary[128];
@@ -304,6 +326,8 @@ static void draw_games(void)
         game_summary(g, summary, sizeof(summary), &color);
         int bw = gfx_text_width(20, summary) + 24;
         draw_badge(SCREEN_W - MARGIN - 24 - bw, y + row_h / 2 - 16, summary, color);
+        if (!g->profile->verified)
+            draw_badge(tx + gfx_text_width(30, g->profile->name) + 16, y + 26, tr(STR_UNVERIFIED), C_ORANGE);
     }
 
     Hint hints[] = {{"A", tr(STR_HINT_OPEN)},       {"X", tr(STR_HINT_REFRESH)},
@@ -369,14 +393,16 @@ static void draw_game(void)
     snprintf(sub, sizeof(sub), "Switch v%s", g->plan.switch_version);
     draw_header(g->profile->name, sub, &g->icon_small);
 
-    if (!g->plan_ok) {
+    if (!g->analyzed) {
+        // analyse en cours : rien à afficher derrière le message d'attente
+    } else if (!g->plan_ok) {
         gfx_text(MARGIN, HEADER_H + 40, 26, C_RED, tr(g->plan.error != STR_ERR_NONE ? g->plan.error : STR_ERR_ANALYSIS));
     } else if (g->plan.nitems == 0) {
         gfx_text(MARGIN, HEADER_H + 40, 26, C_SUB, tr(STR_NO_SAVE_ANYWHERE));
     }
 
     const int row_h = 116, top = HEADER_H + 24, col_switch = MARGIN + 300, col_steam = MARGIN + 740;
-    for (int i = 0; g->plan_ok && i < g->plan.nitems; i++) {
+    for (int i = 0; g->analyzed && g->plan_ok && i < g->plan.nitems; i++) {
         const SyncItem *it = &g->plan.items[i];
         int y = top + i * (row_h + 12);
         bool sel = i == s_app.sel_item;
@@ -384,9 +410,9 @@ static void draw_game(void)
             gfx_round_rect(MARGIN - 4, y - 4, SCREEN_W - 2 * MARGIN + 8, row_h + 8, 18, C_BORDER);
         gfx_round_rect(MARGIN, y, SCREEN_W - 2 * MARGIN, row_h, 14, sel ? C_PANEL_SEL : C_PANEL);
 
-        char label[48];
-        snprintf(label, sizeof(label), tr(STR_SLOT), it->map->slot);
-        gfx_text(MARGIN + 24, y + 20, 28, C_TEXT, label);
+        char label[96];
+        item_label(it, label, sizeof(label));
+        gfx_text_fit(MARGIN + 24, y + 20, 28, C_TEXT, label, col_switch - MARGIN - 40);
         draw_badge(MARGIN + 24, y + 64, status_text(it->status), status_color(it->status));
 
         draw_side(col_switch, y + 16, "SWITCH", &it->sw, it->status == SYNC_TO_STEAM);
@@ -397,7 +423,7 @@ static void draw_game(void)
     }
 
     // Raison du statut de l'emplacement sélectionné, et actions possibles
-    if (g->plan_ok && g->plan.nitems > 0) {
+    if (g->analyzed && g->plan_ok && g->plan.nitems > 0) {
         const SyncItem *it = &g->plan.items[s_app.sel_item];
         gfx_text_fit(MARGIN, SCREEN_H - FOOTER_H - 40, 22, C_SUB, tr(it->reason), SCREEN_W - 2 * MARGIN);
         Hint hints[5];
@@ -436,12 +462,12 @@ static void draw_confirm_sync(void)
     const SyncSide *src = to_steam ? &it->sw : &it->st;
     const SyncSide *dst = to_steam ? &it->st : &it->sw;
 
-    int x, y, w = 860, h = 380;
+    int x, y, w = 900, h = g->profile->verified ? 380 : 414;
     draw_dialog_box(w, h, &x, &y);
     const char *title = tr(to_steam ? STR_CONFIRM_TO_STEAM : STR_CONFIRM_TO_SWITCH);
     gfx_text(x + 40, y + 32, 34, C_TEXT, title);
-    char line[160], slot[48];
-    snprintf(slot, sizeof(slot), tr(STR_SLOT), it->map->slot);
+    char line[256], slot[96];
+    item_label(it, slot, sizeof(slot));
     snprintf(line, sizeof(line), "%s  ·  %s", g->profile->name, slot);
     gfx_text(x + 40, y + 84, 24, C_SUB, line);
 
@@ -454,6 +480,10 @@ static void draw_confirm_sync(void)
     gfx_text(x + 300, y + 176, 22, dst->exists ? C_TEXT : C_DIM, b);
 
     int ty = y + 236;
+    if (!g->profile->verified) {
+        gfx_text(x + 40, ty, 22, C_ORANGE, tr(STR_WARN_UNVERIFIED));
+        ty += 34;
+    }
     if (it->status == SYNC_EQUAL) {
         gfx_text(x + 40, ty, 22, C_SUB, tr(STR_ALREADY_SYNCED));
         ty += 34;
@@ -573,7 +603,7 @@ static void free_games(void)
     s_app.ngames = 0;
 }
 
-// Relit les deux côtés pour tous les jeux compatibles installés
+// Liste les jeux compatibles installés, sans réseau : l'analyse se fait à l'ouverture d'un jeu
 static void refresh_games(void)
 {
     free_games();
@@ -595,22 +625,28 @@ static void refresh_games(void)
             gfx_image_load(jpeg, len, ICON_SMALL, ICON_SMALL, &g->icon_small);
         }
     }
-    if (s_app.ngames == 0)
-        return;
+}
+
+// Compare la save Switch et Steam Cloud pour un jeu (relu à chaque ouverture : le jeu
+// a pu être lancé entre-temps)
+static void analyze_game(Game *g)
+{
+    sync_plan_free(&g->plan);
+    g->analyzed = false;  // pas d'ancien résultat affiché pendant l'analyse
+    g->plan_ok = false;
+    s_app.sel_item = 0;
 
     SteamCM cm;
     if (!connect_steam(&cm)) {
-        for (int i = 0; i < s_app.ngames; i++)
-            s_app.games[i].plan.error = STR_ERR_STEAM_UNREACHABLE;
+        g->plan.error = STR_ERR_STEAM_UNREACHABLE;
+        g->analyzed = true;
         return;
     }
-    for (int i = 0; i < s_app.ngames; i++) {
-        Game *g = &s_app.games[i];
-        char msg[96];
-        snprintf(msg, sizeof(msg), tr(STR_BUSY_ANALYZING), g->profile->name);
-        render_busy(msg);
-        g->plan_ok = sync_build_plan(&cm, g->profile, &g->save, &g->plan);
-    }
+    char msg[96];
+    snprintf(msg, sizeof(msg), tr(STR_BUSY_ANALYZING), g->profile->name);
+    render_busy(msg);
+    g->plan_ok = sync_build_plan(&cm, g->profile, &g->save, &g->plan);
+    g->analyzed = true;
     cm_close(&cm);
 }
 
@@ -630,9 +666,9 @@ static void do_sync(void)
     if (need_steam)
         cm_close(&cm);
 
-    char body[256], slot[48];
+    char body[256], slot[96];
     if (ok) {
-        snprintf(slot, sizeof(slot), tr(STR_SLOT), it->map->slot);
+        item_label(it, slot, sizeof(slot));
         snprintf(body, sizeof(body), tr(STR_MSG_SUCCESS_BODY), g->profile->name, slot);
         show_message(tr(STR_MSG_SUCCESS_TITLE), body, C_GREEN);
     } else {
@@ -717,8 +753,8 @@ static void handle_input(u64 down)
         if ((down & HidNpadButton_AnyUp) && s_app.sel_game > 0)
             s_app.sel_game--;
         if ((down & HidNpadButton_A) && s_app.ngames > 0) {
-            s_app.sel_item = 0;
             s_app.screen = SCR_GAME;
+            analyze_game(&s_app.games[s_app.sel_game]);
         }
         if (down & HidNpadButton_X)
             refresh_games();
@@ -736,7 +772,7 @@ static void handle_input(u64 down)
         }
         if (!g->plan_ok || g->plan.nitems == 0) {
             if (down & HidNpadButton_X)
-                refresh_games();
+                analyze_game(g);
             break;
         }
         if ((down & HidNpadButton_AnyDown) && s_app.sel_item + 1 < g->plan.nitems)
@@ -767,6 +803,7 @@ bool ui_init(void)
 {
     memset(&s_app, 0, sizeof(s_app));
     i18n_init();
+    profiles_load();
     if (!gfx_init())
         return false;
     padConfigureInput(1, HidNpadStyleSet_NpadStandard);
