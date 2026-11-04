@@ -2,3 +2,4 @@ requests
 qrcode
 websocket-client
 cryptography
+pillow
