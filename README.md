@@ -76,7 +76,7 @@ open an issue to report whether it works, so it can be marked as verified.
 
 ## Install
 
-1. Copy `savesync.nro` to `sdmc:/switch/savesync/savesync.nro`.
+1. Download `savesync.nro` from the [Releases page](https://github.com/Rimsoo/SaveSync/releases) and copy it to `sdmc:/switch/savesync/savesync.nro`.
 2. Launch it from the Homebrew Menu (or Sphaira).
 3. Scan the QR code with the Steam mobile app (Steam Guard tab → QR icon).
 
