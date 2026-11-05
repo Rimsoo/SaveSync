@@ -1,5 +1,9 @@
 # SaveSync
 
+> [!NOTE]
+> Main repository: [Forgejo](https://forgejo.aaaoz.fr/Rimso/SaveSync) · Mirror: [GitHub](https://github.com/Rimsoo/SaveSync) (kept in sync automatically).
+> Issues and feedback are welcome on GitHub.
+
 **Sync your game saves between a Nintendo Switch and Steam Cloud — directly from the Switch.**
 
 SaveSync is a Switch homebrew that signs in to your Steam account (by scanning a QR code with
