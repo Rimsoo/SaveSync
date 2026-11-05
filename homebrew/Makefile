@@ -40,7 +40,7 @@ include $(DEVKITPRO)/libnx/switch_rules
 TARGET		:=	savesync
 APP_TITLE	:=	SaveSync
 APP_AUTHOR	:=	Rimso
-APP_VERSION	:=	0.1.0
+APP_VERSION	:=	1.0.0
 BUILD		:=	build
 SOURCES		:=	source source/third_party/qrcodegen
 DATA		:=	data
