@@ -3,13 +3,22 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "transform.h"
+
 // Profils de jeu, chargés depuis games.ini (voir homebrew/romfs/games.ini pour le format).
 
 typedef enum {
     CONV_NONE,            // même format des deux côtés : copie directe
     CONV_HOLLOW_KNIGHT,   // PC chiffré <-> Switch JSON en clair
     CONV_ORI,             // Ori DE : GUID d'objets renommés, fichier Switch de taille fixe
+    CONV_TRANSFORM,       // étapes simples fichier par fichier (transform = ..., voir transform.h)
 } Converter;
+
+typedef enum {
+    STATUS_VERIFIED,      // testé pour de vrai dans les deux sens
+    STATUS_UNVERIFIED,    // fichiers connus des deux côtés, pas encore testé
+    STATUS_EXPERIMENTAL,  // une partie des noms de fichiers est supposée (pas encore vue)
+} ProfileStatus;
 
 #define PROFILE_PATH_LEN 256
 
@@ -21,14 +30,16 @@ typedef struct {
     int slot_offset;      // ajouté au numéro capturé par '#' pour l'affichage
 } ProfileMap;
 
-#define PROFILE_MAX_MAPS 4
+#define PROFILE_MAX_MAPS 6
 
 typedef struct {
     char name[64];
     uint64_t title_id;    // ID du jeu sur Switch
     uint32_t appid;       // AppID Steam
     Converter converter;
-    bool verified;        // testé pour de vrai dans les deux sens
+    Transform transform;  // étapes de CONV_TRANSFORM
+    ProfileStatus status;
+    bool verified;        // status == STATUS_VERIFIED
     bool combine;         // les lignes map de même numéro d'emplacement forment une seule save
     int nmaps;
     ProfileMap maps[PROFILE_MAX_MAPS];

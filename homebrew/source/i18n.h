@@ -40,6 +40,8 @@ typedef enum {
     STR_FILES,           // %d %s
     STR_UNVERIFIED,
     STR_WARN_UNVERIFIED,
+    STR_EXPERIMENTAL,
+    STR_WARN_EXPERIMENTAL,
     STR_SLOT,            // %d
     STR_WHO_LOGGED_IN,   // %s %s
     STR_WHO_SWITCH,      // %s

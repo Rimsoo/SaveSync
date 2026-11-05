@@ -1,6 +1,7 @@
 #include <ctype.h>
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 
 #include "pattern.h"
 
@@ -103,9 +104,33 @@ static bool match_from(const char *p, const char *t, PatternMatch *m)
     return *p == *t && match_from(p + 1, t + 1, m);
 }
 
+// Longueur d'une racine "%Nom%" en tête de s (0 s'il n'y en a pas)
+static size_t root_len(const char *s)
+{
+    if (*s != '%')
+        return 0;
+    const char *end = strchr(s + 1, '%');
+    if (!end || memchr(s, '/', end - s))
+        return 0;
+    return end - s + 1;
+}
+
 bool pattern_match(const char *pattern, const char *text, PatternMatch *m)
 {
     memset(m, 0, sizeof(*m));
+    size_t pl = root_len(pattern), tl = root_len(text);
+    if (pl || tl) {
+        if (pl != tl || strncasecmp(pattern, text, pl) != 0)
+            return false;
+        // Certaines règles Steam écrivent "%Racine%./fichier" : le "./" fait partie de la racine
+        if (strncmp(text + tl, "./", 2) == 0 && strncmp(pattern + pl, "./", 2) != 0)
+            tl += 2;
+        if (tl >= sizeof(m->root))
+            return false;
+        memcpy(m->root, text, tl);
+        m->root[tl] = '\0';
+        return match_from(pattern + pl, text + tl, m);
+    }
     return match_from(pattern, text, m);
 }
 
@@ -113,6 +138,15 @@ bool pattern_expand(const char *pattern, const PatternMatch *m, const char *rest
 {
     size_t n = 0;
     int cap = 0;
+    size_t rl = root_len(pattern);
+    if (rl && m->root[0]) {
+        // Racine telle qu'écrite dans le cloud, pour réécrire exactement le même nom
+        n = strlen(m->root);
+        if (n >= out_len)
+            return false;
+        memcpy(out, m->root, n);
+        pattern += rl;
+    }
     for (const char *p = pattern; *p; p++) {
         const char *piece;
         char single[2] = {*p, '\0'};

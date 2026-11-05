@@ -42,14 +42,14 @@
 
 // ------------------------------------------------------------------ état
 
-#define MAX_GAMES 16
+#define MAX_GAMES 128
 #define ICON_BIG 96
 #define ICON_SMALL 56
 
 typedef struct {
     const GameProfile *profile;
     SaveEntry save;
-    SyncPlan plan;
+    SyncPlan *plan;  // alloué à la première analyse (un plan est gros : seulement les jeux ouverts)
     bool analyzed;  // analysé à l'ouverture du jeu, pas au lancement de l'appli
     bool plan_ok;
     GfxImage icon, icon_small;
@@ -410,6 +410,16 @@ static void draw_login(void)
 
 // ------------------------------------------------------------------ liste des jeux
 
+// Plan d'un jeu ; un plan vide tant que le jeu n'a pas été analysé
+static SyncPlan *plan_of(const Game *g)
+{
+    static SyncPlan empty;
+    if (g->plan)
+        return g->plan;
+    empty.error = STR_ERR_NONE;
+    return &empty;
+}
+
 static void game_summary(const Game *g, char *out, size_t len, Color *color)
 {
     if (!g->analyzed) {
@@ -418,15 +428,15 @@ static void game_summary(const Game *g, char *out, size_t len, Color *color)
         return;
     }
     if (!g->plan_ok) {
-        snprintf(out, len, "%s", tr(g->plan.error != STR_ERR_NONE ? g->plan.error : STR_ERR_ANALYSIS));
+        snprintf(out, len, "%s", tr(plan_of(g)->error != STR_ERR_NONE ? plan_of(g)->error : STR_ERR_ANALYSIS));
         *color = C_RED;
         return;
     }
     int conflicts = 0, pending = 0;
-    for (int i = 0; i < g->plan.nitems; i++) {
-        if (g->plan.items[i].status == SYNC_CONFLICT)
+    for (int i = 0; i < plan_of(g)->nitems; i++) {
+        if (plan_of(g)->items[i].status == SYNC_CONFLICT)
             conflicts++;
-        else if (g->plan.items[i].status != SYNC_EQUAL)
+        else if (plan_of(g)->items[i].status != SYNC_EQUAL)
             pending++;
     }
     char c[48], p[48];
@@ -441,7 +451,7 @@ static void game_summary(const Game *g, char *out, size_t len, Color *color)
     } else if (pending) {
         snprintf(out, len, "%s", p);
         *color = C_BLUE;
-    } else if (g->plan.nitems == 0) {
+    } else if (plan_of(g)->nitems == 0) {
         snprintf(out, len, "%s", tr(STR_NO_SAVE));
         *color = C_SUB;
     } else {
@@ -479,7 +489,7 @@ static void draw_games(void)
 
         char version[16] = "?", slots[48], sub[128];
         saves_game_version(g->profile->title_id, version, sizeof(version));
-        snprintf(slots, sizeof(slots), tr(g->plan.nitems > 1 ? STR_SLOTS_MANY : STR_SLOTS_ONE), g->plan.nitems);
+        snprintf(slots, sizeof(slots), tr(plan_of(g)->nitems > 1 ? STR_SLOTS_MANY : STR_SLOTS_ONE), plan_of(g)->nitems);
         if (g->analyzed && g->plan_ok)
             snprintf(sub, sizeof(sub), "%s  ·  Switch v%s  ·  Steam %u", slots, version, g->profile->appid);
         else
@@ -491,8 +501,11 @@ static void draw_games(void)
         game_summary(g, summary, sizeof(summary), &color);
         int bw = gfx_text_width(20, summary) + 24;
         draw_badge(SCREEN_W - MARGIN - 24 - bw, y + row_h / 2 - 16, summary, color);
-        if (!g->profile->verified)
-            draw_badge(tx + gfx_text_width(30, g->profile->name) + 16, y + 26, tr(STR_UNVERIFIED), C_ORANGE);
+        if (!g->profile->verified) {
+            bool exp = g->profile->status == STATUS_EXPERIMENTAL;
+            draw_badge(tx + gfx_text_width(30, g->profile->name) + 16, y + 26,
+                       tr(exp ? STR_EXPERIMENTAL : STR_UNVERIFIED), exp ? C_RED : C_ORANGE);
+        }
     }
 
     gfx_reset_clip();
@@ -557,23 +570,23 @@ static void draw_game(void)
 {
     Game *g = &s_app.games[s_app.sel_game];
     char sub[64];
-    snprintf(sub, sizeof(sub), "Switch v%s", g->plan.switch_version);
+    snprintf(sub, sizeof(sub), "Switch v%s", plan_of(g)->switch_version);
     draw_header(g->profile->name, sub, &g->icon_small);
 
     if (!g->analyzed) {
         // analyse en cours : rien à afficher derrière le message d'attente
     } else if (!g->plan_ok) {
-        gfx_text(MARGIN, HEADER_H + 40, 26, C_RED, tr(g->plan.error != STR_ERR_NONE ? g->plan.error : STR_ERR_ANALYSIS));
-    } else if (g->plan.nitems == 0) {
+        gfx_text(MARGIN, HEADER_H + 40, 26, C_RED, tr(plan_of(g)->error != STR_ERR_NONE ? plan_of(g)->error : STR_ERR_ANALYSIS));
+    } else if (plan_of(g)->nitems == 0) {
         gfx_text(MARGIN, HEADER_H + 40, 26, C_SUB, tr(STR_NO_SAVE_ANYWHERE));
     }
 
     const int row_h = 116, stride = row_h + 12, col_switch = MARGIN + 300, col_steam = MARGIN + 740;
     const int visible = (LIST_BOTTOM - LIST_TOP + 12) / stride;
-    const int nitems = g->analyzed && g->plan_ok ? g->plan.nitems : 0;
+    const int nitems = g->analyzed && g->plan_ok ? plan_of(g)->nitems : 0;
     const int view_h = list_begin(&s_app.scroll_item, s_app.sel_item, nitems, stride, 12, visible);
     for (int i = s_app.scroll_item / stride; i < nitems; i++) {
-        const SyncItem *it = &g->plan.items[i];
+        const SyncItem *it = &plan_of(g)->items[i];
         int y = LIST_TOP + i * stride - s_app.scroll_item;
         if (y >= LIST_TOP + view_h + 8)
             break;
@@ -597,11 +610,11 @@ static void draw_game(void)
 
     gfx_reset_clip();
     if (g->analyzed && g->plan_ok)
-        draw_scrollbar(s_app.scroll_item, visible * stride, g->plan.nitems * stride);
+        draw_scrollbar(s_app.scroll_item, visible * stride, plan_of(g)->nitems * stride);
 
     // Raison du statut de l'emplacement sélectionné, et actions possibles
-    if (g->analyzed && g->plan_ok && g->plan.nitems > 0) {
-        const SyncItem *it = &g->plan.items[s_app.sel_item];
+    if (g->analyzed && g->plan_ok && plan_of(g)->nitems > 0) {
+        const SyncItem *it = &plan_of(g)->items[s_app.sel_item];
         gfx_text_fit(MARGIN, SCREEN_H - FOOTER_H - 40, 22, C_SUB, tr(it->reason), SCREEN_W - 2 * MARGIN);
         Hint hints[6];
         int n = 0;
@@ -725,7 +738,7 @@ static bool dest_looks_ahead(const SyncSide *src, const SyncSide *dst)
 static void draw_confirm_sync(void)
 {
     Game *g = &s_app.games[s_app.sel_game];
-    const SyncItem *it = &g->plan.items[s_app.sel_item];
+    const SyncItem *it = &plan_of(g)->items[s_app.sel_item];
     bool to_steam = s_app.dialog_dir == APPLY_TO_STEAM;
     const SyncSide *src = to_steam ? &it->sw : &it->st;
     const SyncSide *dst = to_steam ? &it->st : &it->sw;
@@ -754,7 +767,8 @@ static void draw_confirm_sync(void)
         ty += 34;
     }
     if (!g->profile->verified) {
-        gfx_text(x + 40, ty, 22, C_ORANGE, tr(STR_WARN_UNVERIFIED));
+        bool exp = g->profile->status == STATUS_EXPERIMENTAL;
+        gfx_text(x + 40, ty, 22, C_ORANGE, tr(exp ? STR_WARN_EXPERIMENTAL : STR_WARN_UNVERIFIED));
         ty += 34;
     }
     if (it->status == SYNC_EQUAL) {
@@ -901,7 +915,10 @@ static bool connect_steam(SteamCM *cm)
 static void free_games(void)
 {
     for (int i = 0; i < s_app.ngames; i++) {
-        sync_plan_free(&s_app.games[i].plan);
+        if (s_app.games[i].plan) {
+            sync_plan_free(s_app.games[i].plan);
+            free(s_app.games[i].plan);
+        }
         gfx_image_free(&s_app.games[i].icon);
         gfx_image_free(&s_app.games[i].icon_small);
     }
@@ -937,21 +954,28 @@ static void refresh_games(void)
 // a pu être lancé entre-temps)
 static void analyze_game(Game *g)
 {
-    sync_plan_free(&g->plan);
+    if (g->plan)
+        sync_plan_free(g->plan);
+    else
+        g->plan = calloc(1, sizeof(SyncPlan));
     g->analyzed = false;  // pas d'ancien résultat affiché pendant l'analyse
     g->plan_ok = false;
     s_app.sel_item = s_app.scroll_item = 0;
+    if (!g->plan) {
+        g->analyzed = true;  // mémoire insuffisante : affiché comme une analyse impossible
+        return;
+    }
 
     SteamCM cm;
     if (!connect_steam(&cm)) {
-        g->plan.error = STR_ERR_STEAM_UNREACHABLE;
+        plan_of(g)->error = STR_ERR_STEAM_UNREACHABLE;
         g->analyzed = true;
         return;
     }
     char msg[96];
     snprintf(msg, sizeof(msg), tr(STR_BUSY_ANALYZING), g->profile->name);
     render_busy(msg);
-    g->plan_ok = sync_build_plan(&cm, g->profile, &g->save, &g->plan);
+    g->plan_ok = sync_build_plan(&cm, g->profile, &g->save, g->plan);
     g->analyzed = true;
     cm_close(&cm);
 }
@@ -959,7 +983,7 @@ static void analyze_game(Game *g)
 static void do_sync(void)
 {
     Game *g = &s_app.games[s_app.sel_game];
-    SyncItem *it = &g->plan.items[s_app.sel_item];
+    SyncItem *it = &plan_of(g)->items[s_app.sel_item];
     SyncDirection dir = s_app.dialog_dir;
     s_app.dialog = DLG_NONE;
 
@@ -968,7 +992,7 @@ static void do_sync(void)
     if (need_steam && !connect_steam(&cm))
         return;
     render_busy(tr(dir == APPLY_TO_STEAM ? STR_BUSY_UPLOADING : STR_BUSY_COPYING));
-    bool ok = sync_apply(need_steam ? &cm : NULL, &g->plan, s_app.sel_item, dir);
+    bool ok = sync_apply(need_steam ? &cm : NULL, g->plan, s_app.sel_item, dir);
     if (need_steam)
         cm_close(&cm);
 
@@ -1118,16 +1142,16 @@ static void handle_input(u64 down)
             open_backups();
             break;
         }
-        if (!g->plan_ok || g->plan.nitems == 0) {
+        if (!g->plan_ok || plan_of(g)->nitems == 0) {
             if (down & HidNpadButton_X)
                 analyze_game(g);
             break;
         }
-        if ((down & HidNpadButton_AnyDown) && s_app.sel_item + 1 < g->plan.nitems)
+        if ((down & HidNpadButton_AnyDown) && s_app.sel_item + 1 < plan_of(g)->nitems)
             s_app.sel_item++;
         if ((down & HidNpadButton_AnyUp) && s_app.sel_item > 0)
             s_app.sel_item--;
-        const SyncItem *it = &g->plan.items[s_app.sel_item];
+        const SyncItem *it = &plan_of(g)->items[s_app.sel_item];
         if ((down & HidNpadButton_A) && (it->status == SYNC_TO_SWITCH || it->status == SYNC_TO_STEAM)) {
             s_app.dialog_dir = it->status == SYNC_TO_SWITCH ? APPLY_TO_SWITCH : APPLY_TO_STEAM;
             s_app.dialog = DLG_CONFIRM_SYNC;

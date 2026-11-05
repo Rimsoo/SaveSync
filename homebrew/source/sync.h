@@ -24,7 +24,7 @@ typedef struct {
     uint64_t mtime;
 } SyncFile;
 
-#define SYNC_MAX_FILES 24
+#define SYNC_MAX_FILES 64
 
 // État d'un côté (Switch ou Steam) pour une save
 typedef struct {

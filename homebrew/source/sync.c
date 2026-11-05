@@ -245,11 +245,53 @@ static bool convert_file(const SyncPlan *plan, const SyncFile *src, SyncDirectio
     }
     if (plan->profile->converter == CONV_ORI)
         return ori_convert(src->data, src->len, dir == APPLY_TO_SWITCH, out, len);
+    if (plan->profile->converter == CONV_TRANSFORM)
+        return transform_apply(&plan->profile->transform, src->data, src->len, dir == APPLY_TO_SWITCH, out, len);
     *out = malloc(src->len ? src->len : 1);
     if (!*out)
         return false;
     memcpy(*out, src->data, src->len);
     *len = src->len;
+    return true;
+}
+
+static bool same_bytes(const uint8_t *a, size_t a_len, const uint8_t *b, size_t b_len)
+{
+    return a_len == b_len && memcmp(a, b, a_len) == 0;
+}
+
+// Un fichier Steam et son équivalent Switch ont-ils le même contenu ? Comparé dans les deux
+// sens : une recompression (zlib) ne redonne pas forcément les mêmes octets, et retirer un
+// remplissage (pad) peut aussi retirer des zéros qui faisaient partie du fichier PC
+static bool transform_same(const Transform *t, const SyncFile *st, const SyncFile *sw)
+{
+    uint8_t *conv;
+    size_t len;
+    bool same = false;
+    if (transform_apply(t, sw->data, sw->len, false, &conv, &len)) {
+        same = same_bytes(conv, len, st->data, st->len);
+        free(conv);
+    }
+    if (!same && transform_apply(t, st->data, st->len, true, &conv, &len)) {
+        same = same_bytes(conv, len, sw->data, sw->len);
+        free(conv);
+    }
+    return same;
+}
+
+// Saves converties fichier par fichier : mêmes fichiers des deux côtés, de contenu équivalent
+static bool transform_equivalent(const SyncPlan *plan, const SyncItem *item)
+{
+    if (item->st.nfiles != item->sw.nfiles)
+        return false;
+    for (int i = 0; i < item->st.nfiles; i++) {
+        const SyncFile *sw = NULL;
+        for (int j = 0; j < item->sw.nfiles && !sw; j++)
+            if (same_file(&item->st.files[i], &item->sw.files[j]))
+                sw = &item->sw.files[j];
+        if (!sw || !transform_same(&plan->profile->transform, &item->st.files[i], sw))
+            return false;
+    }
     return true;
 }
 
@@ -260,6 +302,8 @@ static bool equivalent(const SyncPlan *plan, const SyncItem *item)
         return false;
     if (plan->profile->converter == CONV_NONE)
         return strcmp(item->sw.sha, item->st.sha) == 0;
+    if (plan->profile->converter == CONV_TRANSFORM)
+        return transform_equivalent(plan, item);
     uint8_t *converted;
     size_t len;
     if (!convert_file(plan, &item->st.files[0], APPLY_TO_SWITCH, &converted, &len))
@@ -407,6 +451,8 @@ bool sync_build_plan(SteamCM *cm, const GameProfile *profile, const SaveEntry *s
                 continue;
             if (!item->match.var[0])  // variable {…} telle qu'écrite dans le cloud
                 snprintf(item->match.var, sizeof(item->match.var), "%s", m.var);
+            if (!item->match.root[0])  // racine "%…%" telle qu'écrite dans le cloud
+                snprintf(item->match.root, sizeof(item->match.root), "%s", m.root);
             if (!cloud_download(cm, profile->appid, s_cloud[c].filename, &f->data, &f->len)) {
                 log_printf("%s : telechargement impossible\n", s_cloud[c].filename);
                 plan->error = STR_ERR_DOWNLOAD;
@@ -442,6 +488,9 @@ bool sync_build_plan(SteamCM *cm, const GameProfile *profile, const SaveEntry *s
         for (int j = 0; j < plan->nitems && !item->match.var[0]; j++)
             if (plan->items[j].map == item->map && plan->items[j].match.var[0])
                 strcpy(item->match.var, plan->items[j].match.var);
+        for (int j = 0; j < plan->nitems && !item->match.root[0]; j++)
+            if (plan->items[j].map == item->map && plan->items[j].match.root[0])
+                strcpy(item->match.root, plan->items[j].match.root);
         const ProfileMap *key_map = plan->profile->combine ? &profile->maps[0] : item->map;
         if (!pattern_expand(key_map->steam, &item->match, "", item->state_key, sizeof(item->state_key)))
             item->state_key[0] = '\0';

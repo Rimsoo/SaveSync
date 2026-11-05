@@ -51,10 +51,12 @@ static bool validate(GameProfile *p, const char *file)
         problem = "steam = AppID manquant";
     else if (p->nmaps == 0)
         problem = "aucune ligne map valide";
-    if (!problem && p->combine && p->converter != CONV_NONE)
+    // Les étapes "transform" travaillent fichier par fichier ; les autres convertisseurs, non
+    bool per_file = p->converter == CONV_NONE || p->converter == CONV_TRANSFORM;
+    if (!problem && p->combine && !per_file)
         problem = "un convertisseur ne s'applique qu'a des saves d'un seul fichier (pas combine)";
     for (int i = 0; !problem && i < p->nmaps; i++)
-        if (p->maps[i].group && p->converter != CONV_NONE)
+        if (p->maps[i].group && !per_file)
             problem = "un convertisseur ne s'applique qu'a des fichiers seuls, pas a un dossier (**)";
     if (problem)
         log_printf("%s [%s] ignore : %s\n", file, p->name, problem);
@@ -97,6 +99,7 @@ static void load_file(const char *path)
             if (end)
                 *end = '\0';
             memset(&cur, 0, sizeof(cur));
+            cur.status = STATUS_UNVERIFIED;
             snprintf(cur.name, sizeof(cur.name), "%s", trim(s + 1));
             in_section = true;
             map_error = false;
@@ -115,6 +118,13 @@ static void load_file(const char *path)
             cur.title_id = strtoull(value, NULL, 16);
         } else if (strcmp(key, "steam") == 0) {
             cur.appid = strtoul(value, NULL, 10);
+        } else if (strcmp(key, "transform") == 0) {
+            if (transform_parse(value, &cur.transform)) {
+                cur.converter = CONV_TRANSFORM;
+            } else {
+                log_printf("%s ligne %d : transform invalide\n", path, lineno);
+                map_error = true;
+            }
         } else if (strcmp(key, "converter") == 0) {
             cur.converter = strcmp(value, "hollow_knight") == 0 ? CONV_HOLLOW_KNIGHT
                             : strcmp(value, "ori") == 0         ? CONV_ORI
@@ -122,7 +132,10 @@ static void load_file(const char *path)
         } else if (strcmp(key, "combine") == 0) {
             cur.combine = strcmp(value, "yes") == 0;
         } else if (strcmp(key, "status") == 0) {
-            cur.verified = strcmp(value, "verified") == 0;
+            cur.status = strcmp(value, "verified") == 0       ? STATUS_VERIFIED
+                         : strcmp(value, "experimental") == 0 ? STATUS_EXPERIMENTAL
+                                                              : STATUS_UNVERIFIED;
+            cur.verified = cur.status == STATUS_VERIFIED;
         } else if (strcmp(key, "slot_offset") == 0) {
             if (cur.nmaps > 0)
                 cur.maps[cur.nmaps - 1].slot_offset = atoi(value);

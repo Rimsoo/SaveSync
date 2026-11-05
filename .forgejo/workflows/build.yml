@@ -1,0 +1,61 @@
+# Builds savesync.nro on every push. On a "v*" tag, also creates the Forgejo release
+# (pre-release when the tag contains a '-', e.g. v0.2.0-beta) with the .nro attached.
+name: build
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+
+jobs:
+  build:
+    runs-on: docker
+    container:
+      image: devkitpro/devkita64:latest
+    steps:
+      - name: Tools
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends git curl jq ca-certificates >/dev/null
+          dkp-pacman -Sy --noconfirm --needed switch-curl switch-zlib switch-mbedtls
+
+      # Plain git instead of actions/checkout: the devkitPro image has no Node.js
+      - name: Checkout
+        run: |
+          git clone --quiet "${{ forgejo.server_url }}/${{ forgejo.repository }}.git" src
+          cd src
+          git fetch --quiet origin "${{ forgejo.sha }}"
+          git checkout --quiet "${{ forgejo.sha }}"
+
+      - name: Build
+        run: |
+          cd src/homebrew
+          version=$(sed -n 's/^APP_VERSION[[:space:]]*:=[[:space:]]*//p' Makefile)
+          if [ "${{ forgejo.ref_type }}" = tag ]; then
+            version="${{ forgejo.ref_name }}"
+            version="${version#v}"
+          fi
+          make -j"$(nproc)" APP_VERSION="$version"
+          ls -l savesync.nro
+
+      - name: Release
+        if: forgejo.ref_type == 'tag'
+        env:
+          TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          API: ${{ forgejo.server_url }}/api/v1/repos/${{ forgejo.repository }}
+          TAG: ${{ forgejo.ref_name }}
+        run: |
+          set -e
+          case "$TAG" in *-*) pre=true ;; *) pre=false ;; esac
+          id=$(curl -fsS -H "Authorization: token $TOKEN" "$API/releases/tags/$TAG" | jq -r .id) || id=
+          if [ -z "$id" ] || [ "$id" = null ]; then
+            id=$(jq -n --arg tag "$TAG" --argjson pre "$pre" \
+                   '{tag_name: $tag, name: ("SaveSync " + $tag), prerelease: $pre,
+                     body: "Copy savesync.nro to sdmc:/switch/ and launch it in title mode (hold R on a game)."}' |
+                 curl -fsS -X POST -H "Authorization: token $TOKEN" -H "Content-Type: application/json" \
+                      -d @- "$API/releases" | jq -r .id)
+          fi
+          curl -fsS -X POST -H "Authorization: token $TOKEN" \
+               -F "attachment=@src/homebrew/savesync.nro" "$API/releases/$id/assets?name=savesync.nro" >/dev/null
+          echo "savesync.nro attached to release $TAG"
