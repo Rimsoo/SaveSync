@@ -77,7 +77,7 @@ open an issue to report whether it works, so it can be marked as verified.
 ## Install
 
 1. Download `savesync.nro` from the [Releases page](https://github.com/Rimsoo/SaveSync/releases) and copy it to `sdmc:/switch/savesync/savesync.nro`.
-2. Launch it from the Homebrew Menu (or Sphaira).
+2. Launch it from the Homebrew Menu (or Sphaira) **in title mode**: hold R while starting any game. Avoid launching it from the Album applet: it has very little memory, and a crash there takes down the whole console.
 3. Scan the QR code with the Steam mobile app (Steam Guard tab → QR icon).
 
 **Close the game before syncing it**: a running game locks its save.
