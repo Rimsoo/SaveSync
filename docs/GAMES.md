@@ -49,6 +49,9 @@ on one side only.
 | Bloodstained: Curse of the Moon | `01004B800AF5A000` | 838310 | 🟡 unverified | Bloodstained: Curse of the Moon (GBAtemp): copy GameData*.bin only, never SystemData.bin. |
 | Ori and the Will of the Wisps | `01008DD013200000` | 1057090 | 🟡 unverified | ns-cross-save-games: copy all the *.uberstate files (Switch: saveFile0.uberstate..., GBAtemp download). |
 | GYLT | `0100AC601DCA8000` | 2206210 | 🟠 experimental | GBAtemp: Stadia's "save.bin" works on Switch once renamed "ValleySaveGameSlot". |
+| Shovel Knight: Treasure Trove | `010057D0021E8000` | 250760 | 🟡 unverified | Steam picks the cloud names itself; names from the Ludusavi manifest, Switch names from shared saves. GBAtemp: compatible. Same "saveData.bin" on both sides. |
+| Dead Cells | `0100646009FBE000` | 588650 | 🟡 unverified | Same "user_N.dat" on both sides. GBAtemp lists it as "unsuccessful (needs confirmation)": the game refuses saves from another version. |
+| Battle Chef Brigade Deluxe | `0100CC2001C6C000` | 452570 | 🟠 experimental | GBAtemp: compatible. Steam: *.save (Ludusavi); Switch names assumed identical. |
 | Into the Breach | `010057D00B612000` | 590380 | 🟡 unverified | `transform = zlib`. GBAtemp: the Switch files are zlib-compressed Lua; same profile folders as on PC. |
 | Cult of the Lamb | `01002E7016C46000` | 1313140 | 🟡 unverified | `transform = zlib header:ZB`. Switch slot_N / meta_N = "ZB" + zlib(JSON of the PC file), github.com/0dm/CultOfTheLamb-SwitchToPCSaves. Saves made before the Woolhaven update only: later ones are MessagePack (slot_NMP / .mp). |
 | One Step From Eden | `010048800F41C000` | 960690 | 🟡 unverified | `transform = osfe`. The PC file is AES-encrypted, the Switch one is plain (github.com/blai30/save-converters, the encryption reproduces real PC saves byte for byte). Same .NET data on both sides. |
@@ -85,7 +88,7 @@ on one side only.
 | Metro: Last Light Redux | `0100F0400E850000` | 287390 | 🟠 experimental | Reported as a plain copy; Switch names assumed identical to PC |
 | Sonic Mania | `01009AA000FAA000` | 584400 | 🟠 experimental | GBAtemp: compatible. Switch dump: SaveData.bin (+ Options.bin); PC cloud name guessed. |
 | ENDER LILIES: Quietus of the Knights | `0100CCF012E9A000` | 1369630 | 🟠 experimental | Reported as a plain copy; Switch names assumed identical to PC |
-| OCTOPATH TRAVELER II | `0100A3501946E000` | 1971650 | 🟠 experimental | Switch save (GBAtemp download): MJSaveData0..2 + MJSystemData. PC names guessed. |
+| OCTOPATH TRAVELER II | `0100A3501946E000` | 1971650 | 🟡 unverified | Switch save (GBAtemp download): MJSaveData0..2 + MJSystemData; PC: SaveData*.sav (Ludusavi). A reddit guide covers PC -> Switch; Octopath Traveler 1 needed more than a rename, so test carefully. |
 | BRAVELY DEFAULT II | `01006DC010326000` | 1446650 | 🟠 experimental | Switch save (GBAtemp download): SaveGameData0, SaveGameData1. |
 | Shin Megami Tensei V: Vengeance | `010069C01AB82000` | 1875830 | 🟡 unverified | Switch save (GBAtemp download): GameSave01.. and SysSave, without ".sav". |
 | CRISIS CORE -FINAL FANTASY VII- REUNION | `01004BC0166CC000` | 1608070 | 🟠 experimental | Reported as a plain copy; Switch names assumed identical to PC |
@@ -123,9 +126,9 @@ game load the save?) so it can be marked as verified or fixed.
 | Ys VIII: Lacrimosa of DANA | Switch: `savedata/nxsave/data0001/SAVEDATA.DAT`; PC layout unknown |
 | The Witcher 3 | Same `ManualSave_*.sav`/`.png` names on both sides, but the Steam rule path (`%WinMyDocuments%/The Witcher 3/…`) is unusual and newer PC versions may not load on Switch |
 | Sea of Stars, Enter the Gungeon, Doki Doki Literature Club Plus, Transistor, Streets of Rage 4 | Switch names known (shared saves) but no transfer report yet |
-| Dave the Diver, Darkest Dungeon, Persona 4 Golden, Okami HD, Children of Morta, Bad North, Shovel Knight, Inside, Yooka-Laylee and the Impossible Lair, Cities: Skylines | Reported compatible, but Steam picks its own cloud file names: they are only visible to an owner (`tools/steamcloud.py cm-list <appid>`) |
+| Dave the Diver, Darkest Dungeon, Persona 4 Golden, Okami HD, Children of Morta, Bad North, Inside, Yooka-Laylee and the Impossible Lair, Cities: Skylines | Reported compatible, but Steam picks its own cloud file names: they are only visible to an owner (`tools/steamcloud.py cm-list <appid>`) |
 | Metro 2033 / Last Light Redux, Witcher 3, Divinity: Original Sin 2, Factorio, Wasteland 2, Fairy Fencer F ADF, Tales of Graces f Remastered, Persona 3 Portable | Reported working but folder layout unknown, saves too large, or official cross-save needed |
-| Triangle Strategy, World of Final Fantasy, Team Sonic Racing, Dead Cells, A Hat in Time, Immortals Fenyx Rising, Tony Hawk 1+2 | Reported **not** working |
+| Triangle Strategy, World of Final Fantasy, Team Sonic Racing, A Hat in Time, Immortals Fenyx Rising, Tony Hawk 1+2 | Reported **not** working |
 
 ## Wanted
 
@@ -169,6 +172,7 @@ from Steam's public app info (`tools/cloudconfig.py`).
 - GBAtemp: [Successful savegame transfers between PC and Switch](https://gbatemp.net/threads/successful-savegame-transfers-between-pc-and-switch.561000/)
 - [ns-cross-save-games.github.io](https://ns-cross-save-games.github.io/) (unofficial cross-save list)
 - Shared Switch saves: [GBAtemp downloads](https://gbatemp.net/download/categories/game-saves.1668/), the GBAtemp "New Switch Save site" thread, [Viren070/NX_Saves](https://github.com/Viren070/NX_Saves) (file names only)
+- [Ludusavi manifest](https://github.com/mtkennerly/ludusavi-manifest) (PC and Steam Cloud file names)
 - [EdiZon configs](https://github.com/WerWolv/EdiZon_CheatsConfigsAndScripts) (Switch save file names)
 - [CultOfTheLamb-SwitchToPCSaves](https://github.com/0dm/CultOfTheLamb-SwitchToPCSaves), [blai30/save-converters](https://github.com/blai30/save-converters)
 - Steam guides for Tales of Vesperia and A Short Hike, Steam forum for Slay the Spire

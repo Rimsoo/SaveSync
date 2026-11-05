@@ -47,7 +47,7 @@ Game profiles live in [`homebrew/romfs/games.ini`](homebrew/romfs/games.ini).
 | Hollow Knight: Silksong | 🟡 unverified | same as Hollow Knight |
 | Hades | 🟡 unverified | none (multi-file slots) |
 | Absolum, Dispatch, Monument Valley 2 | 🟡 unverified | none |
-| ~55 more from the community (Celeste, Into the Breach, Cult of the Lamb, Dragon's Dogma, Tales of Vesperia, Slay the Spire, Cuphead…) | 🟡 unverified / 🟠 experimental | none, renames, or `transform` (zlib, header, padding, encryption) |
+| ~60 more from the community (Celeste, Into the Breach, Cult of the Lamb, Dragon's Dogma, Tales of Vesperia, Slay the Spire, Cuphead…) | 🟡 unverified / 🟠 experimental | none, renames, or `transform` (zlib, header, padding, encryption) |
 
 See [docs/GAMES.md](docs/GAMES.md) for details and the **wanted list**: games whose Steam
 side is already known and that only need someone to check their Switch save.
