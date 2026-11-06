@@ -49,6 +49,11 @@ Game profiles live in [`homebrew/romfs/games.ini`](homebrew/romfs/games.ini).
 | Absolum, Dispatch, Monument Valley 2 | 🟡 unverified | none |
 | ~60 more from the community (Celeste, Into the Breach, Cult of the Lamb, Dragon's Dogma, Tales of Vesperia, Slay the Spire, Cuphead…) | 🟡 unverified / 🟠 experimental | none, renames, or `transform` (zlib, header, padding, encryption) |
 
+> [!TIP]
+> **Help verify the catalog!** Most profiles have never been tested on a real console. If you
+> try one, please open a [game test report](https://github.com/Rimsoo/SaveSync/issues/new?template=game_report.yml)
+> (a few clicks: game, direction, did it load?). It is how profiles get marked as verified.
+
 See [docs/GAMES.md](docs/GAMES.md) for details and the **wanted list**: games whose Steam
 side is already known and that only need someone to check their Switch save.
 
@@ -102,6 +107,20 @@ open an issue to report whether it works, so it can be marked as verified.
 | `sdmc:/switch/savesync/config.txt` | Settings (language) |
 | `sdmc:/switch/savesync/games.ini` | Optional extra / overriding game profiles |
 
+## Security & privacy
+
+- **No password on the Switch**: you sign in by scanning a QR code with the Steam mobile app,
+  through Steam's official sign-in service. Steam Guard stays in charge of approving it.
+- **Only Valve servers are contacted**: the Steam Web API (sign-in), Steam's connection
+  servers (the same protocol as the Steam client) and the Steam Cloud file servers that
+  Steam itself points to. No telemetry, no third-party server.
+- **Your session stays on your SD card** (`session.txt`, see above). Anyone with that file can
+  use your Steam session: don't share it. Signing out in the app deletes it, and you can revoke
+  it anytime from the Steam mobile app or the Steam website (*Deauthorize all devices*).
+- **Open source**: everything the app does is in [`homebrew/source`](homebrew/source).
+- As with any homebrew, keep your modded console away from Nintendo's servers
+  (e.g. with 90DNS or an emuMMC kept offline).
+
 ## Controls
 
 | Button | Action |
@@ -147,6 +166,13 @@ make
 - [QR Code generator library](https://www.nayuki.io/page/qr-code-generator-library) by Project Nayuki (MIT)
 - [stb_truetype / stb_image](https://github.com/nothings/stb) by Sean Barrett (public domain)
 - Steam protocol definitions documented by [SteamDatabase/Protobufs](https://github.com/SteamDatabase/Protobufs)
+- Game catalog: the GBAtemp community ("Successful savegame transfers between PC and Switch"
+  and the shared saves), [ns-cross-save-games](https://ns-cross-save-games.github.io/),
+  [Ludusavi manifest](https://github.com/mtkennerly/ludusavi-manifest),
+  [EdiZon configs](https://github.com/WerWolv/EdiZon_CheatsConfigsAndScripts),
+  [hollow-sync](https://github.com/ArixAR/hollow-sync),
+  [CultOfTheLamb-SwitchToPCSaves](https://github.com/0dm/CultOfTheLamb-SwitchToPCSaves),
+  [blai30/save-converters](https://github.com/blai30/save-converters) — see [docs/GAMES.md](docs/GAMES.md)
 
 ## License
 

@@ -1,0 +1,64 @@
+name: Game test report
+description: Tell us whether a game synced correctly (or not) between Switch and Steam.
+title: "[Game report] "
+labels: ["game report"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for testing! One report per game. SaveSync backs up every save before writing,
+        so a failed test can be undone from the app (**−** on the game → restore a backup).
+  - type: input
+    id: game
+    attributes:
+      label: Game
+      placeholder: Celeste
+    validations:
+      required: true
+  - type: dropdown
+    id: status
+    attributes:
+      label: Profile status shown in SaveSync
+      options:
+        - unverified (orange)
+        - experimental (red)
+        - verified
+        - not in the list (new game)
+    validations:
+      required: true
+  - type: checkboxes
+    id: direction
+    attributes:
+      label: What did you test?
+      options:
+        - label: Switch → Steam (then loaded the save in the PC game)
+        - label: Steam → Switch (then loaded the save on the Switch)
+  - type: dropdown
+    id: result
+    attributes:
+      label: Result
+      options:
+        - Works in every direction I tested
+        - Partly works (see details)
+        - Does not work
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Game versions
+      description: Switch version (shown in SaveSync under the game name) and PC/Steam version if you know it.
+      placeholder: Switch v1.4.0, Steam build 1234567
+  - type: textarea
+    id: details
+    attributes:
+      label: Details
+      description: |
+        What happened in the game? Did the save show up, load, keep the progress?
+        For a game whose save does not appear on one side, the list of files of a JKSV backup
+        (names and sizes only) helps a lot to fix the profile.
+  - type: input
+    id: savesync
+    attributes:
+      label: SaveSync version
+      placeholder: 1.0.0
